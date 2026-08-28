@@ -1,10 +1,12 @@
 import type { GameWorld, Resources } from "../core/world"
-import { playCombatEvent } from "./audio"
+import { playCombatEvent, playSound } from "./audio"
 import { collectCombatEvents, type CombatEventKind } from "./combatEvents"
 import { clearCombatVfx, spawnCombatVfx, updateCombatVfx } from "./combatVfx"
 import { clearDecals, spawnDecal, updateDecals } from "./decals"
 import { clearHitDirection, showHitDirection } from "../ui/hitDirection"
+import { clearDamageNumbers, spawnDamageNumber, updateDamageNumbers } from "../ui/damageNumbers"
 import { shakeCamera } from "./render"
+import { clearTelegraphs, updateTelegraphs } from "./telegraph"
 
 /**
  * 타격 피드백 — 소리와 이펙트를 하나의 신호에서 낸다.
@@ -26,14 +28,28 @@ import { shakeCamera } from "./render"
  * 진폭·감쇠 파라미터는 카메라 담당(Codex)에게 요청해 뒀고, 그때까지는
  * 지속시간만으로 세기를 구분한다. 짧게 여러 번보다 길이 차이가 더 잘 읽힌다.
  */
-const SHAKE: Partial<Record<CombatEventKind, number>> = {
+export const SHAKE: Partial<Record<CombatEventKind, number>> = {
   hit: 0.07,
   hitHeavy: 0.13,
   enemyDeath: 0.16,
   playerHurt: 0.2, // 맞았을 때가 가장 크게 흔들려야 위험이 읽힌다
   whirlwind: 0.18, // 광역기는 기본 공격보다 확실히 크게 — 자원을 쓴 값을 해야 한다
+  // 치명타는 집중 타격(0.13)과 처치(0.16) 사이. 일반 타격의 두 배 이상이라
+  // 카메라만으로도 "방금 크게 들어갔다" 가 손에 전해진다.
+  crit: 0.15,
+  // 소품은 적이 아니다 — 부술 때 화면이 전투만큼 흔들리면 위협으로 오인된다. 아주 얕게.
+  propBreak: 0.05,
   breakSuccess: 0.26,
+  // 돌진 발동. 예고를 놓쳤어도 화면이 한 번 튀어 "지금 온다" 를 알린다.
+  // 다만 맞은 것은 아니므로 피격(0.2)보다는 확실히 작다.
+  enemyRelease: 0.08,
 }
+
+/**
+ * 돌진 충돌은 평타 피격 위에 얹는 추가 흔들림. `playerHurt` 0.2 에 더해져
+ * 이 게임에서 가장 크게 흔들린다 — 예고를 못 읽으면 제일 아프다는 뜻이다.
+ */
+const CHARGE_IMPACT_SHAKE = 0.14
 
 /**
  * 존이 바뀌면 이전 맵의 이펙트와 자국을 지운다.
@@ -47,7 +63,7 @@ let lastZoneId: string | null = null
 
 export function feedbackSystem(world: GameWorld, res: Resources): void {
   if (res.zoneId !== lastZoneId) {
-    if (lastZoneId !== null) { clearCombatVfx(); clearDecals(); clearHitDirection() }
+    if (lastZoneId !== null) { clearCombatVfx(); clearDecals(); clearHitDirection(); clearDamageNumbers(); clearTelegraphs() }
     lastZoneId = res.zoneId
   }
 
@@ -55,11 +71,18 @@ export function feedbackSystem(world: GameWorld, res: Resources): void {
     playCombatEvent(evt)
     spawnCombatVfx(res, evt)
     spawnDecal(res, evt) // 바닥에 남는 흔적 — 전투가 지나간 자리가 보인다
+    spawnDamageNumber(res, evt) // 얼마나 들어갔는가. `amount` 는 S1 의 damageResolved 가 처음 실어 준 값이다
     // 어디서 맞았는지. 공격자 정보는 이벤트에 없지만, 맞으면 공격자 반대쪽으로 밀리므로
     // 넉백 방향을 뒤집으면 공격자 방향이 나온다.
     if (evt.kind === "playerHurt" && evt.entity?.knockback) {
       const d = evt.entity.knockback.dir
       showHitDirection(Math.atan2(-d.x, -d.z), evt.power)
+    }
+    // 돌진 충돌은 베인 게 아니라 몸으로 받은 것이다. 소리와 흔들림을 따로 얹어
+    // "평타에 맞았다" 와 구분한다.
+    if (evt.kind === "playerHurt" && evt.sourceActionId === "charge") {
+      playSound("chargeImpact", evt.power)
+      shakeCamera(res, CHARGE_IMPACT_SHAKE * evt.power)
     }
     const shake = SHAKE[evt.kind]
     // power 는 거리 감쇠를 겸한다. 화면 밖에서 벌어진 일로 화면을 흔들지 않는다.
@@ -67,4 +90,7 @@ export function feedbackSystem(world: GameWorld, res: Resources): void {
   }
   updateCombatVfx(res)
   updateDecals(res)
+  updateDamageNumbers(res)
+  // 위험 구역은 이벤트가 아니라 상태에서 그린다 — 취소 이벤트가 없기 때문이다.
+  updateTelegraphs(world, res)
 }

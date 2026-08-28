@@ -37,7 +37,9 @@ export function spendCost(skill: SkillName, player: PlayerComp, now: number): vo
   player.cooldowns[skill] = now + effectiveSkillCooldown(skill, player)
 }
 
-function isActiveSkill(skill: SkillId): skill is SkillName { return true }
+function isActiveSkill(skill: SkillId): skill is SkillName {
+  return Object.prototype.hasOwnProperty.call(SKILL_TIMING, skill)
+}
 
 function copyPoint(point: Vec2): Vec2 {
   return { x: point.x, z: point.z }

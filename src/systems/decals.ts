@@ -1,6 +1,7 @@
 import * as THREE from "three"
 import type { Resources } from "../core/world"
 import type { CombatEvent, CombatEventKind } from "./combatEvents"
+import { texSize } from "./quality"
 
 /**
  * 바닥 자국 — 전투가 지나간 흔적을 남긴다.
@@ -33,6 +34,11 @@ interface Spec {
 const SPEC: Partial<Record<CombatEventKind, Spec>> = {
   // 일반 타격은 남기지 않는다 — 초당 몇 번씩 나므로 바닥이 금세 지저분해진다.
   hitHeavy: { color: 0x6b4a2c, radius: 0.5, opacity: 0.3 },
+  // 치명타는 집중 타격보다 조금 더 넓게 남긴다. 다만 치명타 확률이 높아지면
+  // 자주 나므로 진하기는 올리지 않는다 — 바닥이 지저분해지면 자국의 의미가 사라진다.
+  crit: { color: 0x7a5230, radius: 0.62, opacity: 0.3 },
+  // 부서진 소품 자리에 남는 잔해 자국. 전투 자국보다 회색에 가깝다.
+  propBreak: { color: 0x6a6153, radius: 0.7, opacity: 0.34 },
   enemyDeath: { color: 0x5a3f28, radius: 0.85, opacity: 0.42 },
   playerHurt: { color: 0x7a3028, radius: 0.6, opacity: 0.3 },
   breakSuccess: { color: 0x2f5a68, radius: 1.15, opacity: 0.4 },
@@ -48,7 +54,7 @@ let texture: THREE.Texture | null = null
 function getTexture(): THREE.Texture | null {
   if (texture) return texture
   if (typeof document === "undefined") return null
-  const size = 128
+  const size = texSize(128)
   const cv = document.createElement("canvas")
   cv.width = cv.height = size
   const g = cv.getContext("2d")

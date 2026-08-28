@@ -5,6 +5,9 @@ import { canEquipItem, type CharacterClass } from "../content/equipment"
 import { rollDropRules } from "../content/drops"
 import type { Entity, GameWorld, ItemInstance, Rarity, Resources } from "../core/world"
 import { worldToScreen } from "./render"
+import { getZone } from "../content/zones"
+import { claimReward, createRunProgress, hasClaimedReward, rewardKey } from "../core/runState"
+import { allocateItemId } from "../core/itemIds"
 
 /**
  * 자동 획득 반경. **근접 사거리(1.8)보다 확실히 넓어야 한다.**
@@ -68,22 +71,37 @@ export function rollDrop(world: GameWorld, res: Resources, enemy: Entity): void 
   if (!enemy.enemy || !enemy.transform) return
   const kind = enemy.enemy.kind
   const playerLevel = world.with("player").entities[0]?.player?.level ?? 1
+  const encounterId = kind === "boss" ? getZone(res.zoneId)?.encounterId : undefined
+  const bossRewardKey = encounterId ? rewardKey(encounterId, "boss-drop") : undefined
+
+  // 보스 보상은 encounter당 한 번만 굴린다. 엔티티가 비정상적으로 재사용되거나
+  // 저장 데이터를 다시 적용해도 같은 보상 묶음이 중복되지 않는다.
+  if (bossRewardKey) {
+    const progress = res.runProgress ?? (res.runProgress = createRunProgress())
+    if (hasClaimedReward(progress, bossRewardKey)) return
+    claimReward(progress, bossRewardKey)
+  }
 
   const rules = rollDropRules(res.rng, DROP_TABLE, {
     playerLevel,
     enemyKind: kind,
+    enemyTags: enemy.enemy.tags,
     zoneId: res.zoneId,
   })
   for (const rule of rules) {
     const catalogItem = getCatalogItem(rule.itemId)
     if (!catalogItem) continue
-    spawnLoot(world, res, enemy, createCatalogItemInstance(catalogItem, res.rng))
+    spawnLoot(world, res, enemy, createCatalogItemInstance(catalogItem, res.rng, allocateItemId(res)))
   }
 
   // 기존 절차적 잡템은 유지해 루팅 빈도를 만든다.
   if (res.rng() > DROP_CHANCE[kind]) return
   const guaranteed: Rarity | undefined = kind === "boss" ? "rare" : undefined
-  const item = rollItem(res.rng, playerLevel, guaranteed ? { guaranteed } : undefined)
+  const item = rollItem(
+    res.rng,
+    playerLevel,
+    guaranteed ? { guaranteed, id: allocateItemId(res) } : { id: allocateItemId(res) },
+  )
   spawnLoot(world, res, enemy, item)
 }
 

@@ -58,10 +58,11 @@ describe("파괴 가능 소품", () => {
     const whirlwind = createGame({ zoneId: "mine", seed: 303, companions: false })
     const wp = whirlwind.player.transform!.position
     const wprop = firstProp(whirlwind)
+    wprop.destructible!.blocksMovement = false
     wprop.transform!.position.x = wp.x + 1
     wprop.transform!.position.z = wp.z
     wprop.destructible!.currentHp = 100
-    whirlwind.player.player!.rage = 20
+    whirlwind.player.player!.rage = 25
     cast(whirlwind, "whirlwind", { x: wp.x, z: wp.z })
     advance(whirlwind, 0.2)
     expect(wprop.destructible!.currentHp).toBeLessThan(100)
@@ -69,6 +70,7 @@ describe("파괴 가능 소품", () => {
     const dash = createGame({ zoneId: "mine", seed: 304, companions: false })
     const dp = dash.player.transform!.position
     const dprop = firstProp(dash)
+    dprop.destructible!.blocksMovement = false
     dprop.transform!.position.x = dp.x + 2
     dprop.transform!.position.z = dp.z
     dprop.destructible!.currentHp = 100
@@ -81,6 +83,7 @@ describe("파괴 가능 소품", () => {
   it("파괴 후에는 동적 충돌에서 빠지고 존 전환 시 소품 상태가 정리된다", () => {
     const game = createGame({ zoneId: "mine", seed: 305, companions: false })
     const prop = firstProp(game)
+    prop.destructible!.blocksMovement = true
     const p = game.player.transform!.position
     prop.transform!.position.x = p.x + 0.8
     prop.transform!.position.z = p.z
@@ -92,7 +95,8 @@ describe("파괴 가능 소품", () => {
     dealDamage(game.world, game.res, game.player, prop, 999)
     expect(prop.destructible!.state).toBe("broken")
     expect(enterZone(game.world, game.res, game.runtime, "town")).toBe(true)
-    expect(game.world.with("destructible").entities).toHaveLength(0)
+    expect(game.world.has(prop)).toBe(false)
+    expect(game.world.with("destructible").entities.length).toBeGreaterThan(0)
   })
 
   it("소품 드랍은 같은 RNG 시드에서 같은 결과를 낸다", () => {

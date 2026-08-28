@@ -159,7 +159,7 @@ export const ITEM_BY_ID: Record<string, CatalogItem> = Object.fromEntries(
   ITEM_CATALOG.map((item) => [item.id, item]),
 )
 
-let nextCatalogItemId = 100_000
+let fallbackNextCatalogItemId = 100_000
 
 /**
  * 카탈로그 정의를 실제 인벤토리 아이템으로 변환한다.
@@ -170,9 +170,13 @@ let nextCatalogItemId = 100_000
  *
  * rng 를 넘기지 않으면 Math.random 을 쓴다. 게임에서는 `res.rng` 를 넘겨 주는 편이 낫다.
  */
-export function createCatalogItemInstance(item: CatalogItem, rng: () => number = Math.random): ItemInstance {
+export function createCatalogItemInstance(
+  item: CatalogItem,
+  rng: () => number = Math.random,
+  id?: number,
+): ItemInstance {
   return {
-    id: nextCatalogItemId++,
+    id: id ?? fallbackNextCatalogItemId++,
     name: item.name,
     slot: item.slot,
     rarity: item.rarity,

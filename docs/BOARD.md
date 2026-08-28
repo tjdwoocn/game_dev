@@ -1571,3 +1571,219 @@ A2 가 먼저 서면 이건 데이터 추가에 가깝다.
   모든 테스트는 단일 프로세스로 순차 실행했고 브라우저·dev 서버는 실행하지 않았습니다.
 - 보스 시나리오는 새 시전 타이밍에 맞춰 예고 회피 입력과 실제 부활 재시도를 포함하도록
   보정했습니다. Claude는 이제 `skillWindup`/release 이벤트를 시각·오디오 연출에 연결하면 됩니다.
+
+### Claude — S1/S2 표현 연결 (2026-08-28)
+
+Codex 의 S1·S2 인계를 시각·오디오에 연결했다. 작업 폴더 이동(`arpg-prototype` → `game_dev`)
+이후 기준이며, PM 스냅샷 커밋(`a399db1`)이 들어와 있는 상태에서 진행했다.
+
+#### ⚠️ 먼저 — 발견한 결함 1건: **치명타가 화면에서 사라져 있었다**
+
+`combatEvents.ts` 의 분기는 이렇다.
+
+```
+target.player → playerHurt / critical → crit / focused → hitHeavy / else → hit
+```
+
+`crit` 이 `hit` 을 **대체**한다. 그런데 내 표현 테이블(`SPARK`·`RING`·`SLASH`·`SOUNDS`·
+`SHAKE`·데칼) 어디에도 `crit` 키가 없었다. 결과적으로 **치명타가 터지면 불꽃·소리·흔들림이
+전부 0** 이었다 — 피해는 더 들어가는데 일반 타격보다 조용했다. 타입체크도 367건 테스트도
+전부 통과했고, 시스템 쪽에는 아무 잘못이 없다. S1 이 시스템만 착지하고 시각 절반이
+비어 있어서 생긴 구멍이다.
+
+#### 붙인 것
+
+| 이벤트 | 연출 |
+|---|---|
+| `crit` | 흰 불꽃(size 0.58 / spread 7.6 — hit 0.26, hitHeavy 0.42 보다 크다) + **얇은 흰 고리**(레퍼런스에서 타격이 원거리에서도 읽히는 핵심) + 금속성 링 사운드 + 카메라 0.15 + 자국 |
+| `skillWindup` | **안으로 조여드는 고리**. 타격 고리와 방향이 반대라 "터졌다" 가 아니라 "곧 나간다" 로 읽힌다. 길이는 S2 의 실제 windup 시간과 맞췄다(회전베기 0.14 / 돌진 0.09) |
+| `skillRelease` | 방어·처형용 범용 발동 고리. windup 과 **같은 색**으로 묶어 `castId` 로 이어진 한 동작이 눈으로도 이어진다 |
+| `propBreak` | 파편(차갑고 탁한 색 — 전투 타격과 구분) + 먼지 고리 + 쪼개지는 소리 + 얕은 카메라(0.05) |
+| **피해 숫자** | 신규 `src/ui/damageNumbers.ts`. `amount` 는 S1 의 `damageResolved` 가 처음 실어 준 값이라 이제야 붙일 수 있었다. DOM 투영 + 24슬롯 풀링, 치명타는 30px/`!` 접미, 일반 17px |
+
+#### 재발 방지 — `tests/presentation.coverage.test.ts` (신규 7건)
+
+`ALL_KINDS` 를 `Record<CombatEventKind, string>` 으로 선언했다. **시스템 쪽에서 이벤트
+종류를 추가하면 이 테스트가 컴파일 단계에서 먼저 깨진다.** 새 종류를 넣으려면 "무엇으로
+보여줄 것인가" 를 한 줄 적게 되고, 이번 같은 무성(無聲) 이벤트가 다시 나오지 않는다.
+치명타가 `hit`·`hitHeavy` 보다 크고 세다는 서열도 함께 고정했다.
+
+#### → Codex 요청 1건: **치명타 히트스톱은 당신 쪽이다**
+
+지금 치명타는 일반 타격과 같은 `HITSTOP.lightHitMs`(50ms)를 쓴다. 더 길어야 맞는데
+**내가 `feedback.ts` 에서 못 건다.**
+
+이유: `scenario/run.ts` 는 `feedbackSystem` 대신 `collectCombatEvents` 를 직접 부른다.
+즉 헤드리스는 feedback 을 타지 않는다. 여기서 `requestHitstop` 을 부르면 **같은 시드인데
+브라우저와 헤드리스의 시뮬레이션 시간이 갈라진다** — "같은 시드·같은 입력 → 같은 결과"
+계약이 깨진다. 카메라 흔들림은 `realNow` 기반이라 안전해서 내가 걸었고, 히트스톱만 남긴다.
+
+`combat.ts` 에서 치명타일 때 `HITSTOP.critMs`(제안 75~80ms)를 요청해 주면 된다.
+
+#### → PM/Codex 참고: 치명타가 지금은 거의 안 터진다
+
+`computeDerived` 의 기본 `critChance` 가 0 이고, 접사 한 줄이 3~7%p 다. 장비를 갖춰도
+한 자릿수라 연출을 볼 일 자체가 드물다. 축은 섰지만 체감이 없다 — 기본값이나 접사 범위를
+올릴지는 밸런스 판단이라 내가 정하지 않는다.
+
+#### 검증
+
+`tsc --noEmit` 0에러 · 단위 **389/389 (35파일)** · `npm run shots` 9뷰 전부 **콘솔 에러 0**.
+스크린샷에서 피해 숫자가 캐릭터 위에 정상 투영되는 것을 확인했다(`mine_combat.png` 의 붉은 `5`
+= `playerHurt`). **치명타 연출 자체는 화면에서 아직 못 봤다** — 위 확률 문제로 실제 치명타를
+띄우지 못했다. 이벤트 계약(`combatEvents.test.ts`: amount 20 / critical true)과 커버리지
+테스트로만 확인한 상태다. 확률이 오르면 녹화로 닫는다.
+
+수정 파일: `systems/combatVfx.ts`, `systems/audio.ts`, `systems/decals.ts`,
+`systems/feedback.ts`, `ui/damageNumbers.ts`(신규), `tests/presentation.coverage.test.ts`(신규).
+전부 내 소유 파일이며 Codex 레인(`combat.ts`·`skills.ts`·`boss.ts`·`world.ts`)은 건드리지 않았다.
+
+### Claude — 품질 티어 이식 (2026-08-28)
+
+레퍼런스 `Claude-of-Tanks/src/engine/quality.js`(524줄)를 우리 렌더 스택에 맞춰 옮겼다.
+신규 `src/systems/quality.ts`.
+
+#### 왜 이걸 먼저 가져왔는가
+
+PM 지적대로 **처음부터 새로 짤 이유가 없는 부분**이다. 장르와 무관한 순수 렌더링
+인프라라 탱크든 몬스터든 그대로 작동한다. 그리고 우리는 이미 이것 때문에 한 번 크게 데었다 —
+헤드리스가 SwiftShader 로 붙는 걸 몰라 프레임을 350~430ms 로 재고 "밀도 불가" 로
+결론 낼 뻔했다. GPU 를 붙이니 같은 장면이 32ms 였다. 레퍼런스의 `heuristicCap()` 첫 줄이
+정확히 그 경우를 잡는다.
+
+#### 무엇을 가져오고 무엇을 버렸는가
+
+그쪽 레버 중 **우리에게 그 패스가 없는 것은 버렸다** — `aoScale`(GTAO 없음),
+`shadowMapSizes` 4단 배열(CSM 없음), FSR 재구성(없음), 모바일 3티어(대상 아님).
+남긴 것은 우리가 실제로 돈을 내는 것뿐이다.
+
+| 레버 | 우리 쪽 소비처 |
+|---|---|
+| `maxPixelRatio` | `renderer.setPixelRatio` |
+| `msaaSamples` | 컴포저 타깃 `samples` |
+| `shadowEnabled` / `shadowMapSize` / `shadowExtent` | 태양 그림자 + **`followSun` 텍셀 스냅** |
+| `bloomScale` | `UnrealBloomPass` 내부 해상도 |
+| `fxaa` | FXAA 패스(실측 +1.6ms) |
+| `textureScale` / `textureCap` | `texSize()` — 불꽃·자국 캔버스 굽기 |
+
+#### 사다리의 원칙: **룩은 레버가 아니다**
+
+레퍼런스도 같은 규칙을 지킨다. 우리 경우 **외곽선과 블룸은 어떤 티어에서도 끄지 않는다** —
+툰 셰이딩 + 외곽선이 이 게임의 정체성이라 그걸 끄면 빨라지는 게 아니라 다른 게임이 된다.
+사다리가 깎는 건 해상도·그림자 맵·AA·**블룸의 내부 해상도**(존재 여부가 아니라 곱기)다.
+그림자는 접지감이 통째로 사라지는 레버라 **최하 티어에서만** 끈다. 이 두 규칙은 테스트로 고정했다.
+
+티어: `minimum · low · medium · high(기본) · ultra`.
+`ultra` 는 자동 감지가 고르지 않는다 — 명시적으로 고르는 검사용 티어다(레퍼런스와 동일).
+
+#### 스크린샷 계약을 함께 고쳤다
+
+자동 감지가 기기마다 다른 티어를 고르면 **대조 시트끼리 비교가 무의미해진다.**
+`views.mjs` 가 `?quality=high` 로 티어를 고정하도록 바꿨고, `--quality=low` 로 티어별
+비교 샷을 찍을 수 있다. `?seed=` 하나만으로는 결정적이지 않았다는 뜻이다.
+
+#### 검증
+
+`tsc` 0에러 · 단위 **400/400 (36파일)** · 신규 `tests/quality.test.ts` 11건.
+테스트는 `window` 없는 환경에서 돌아 헤드리스 안전성도 함께 잡는다.
+
+실제 브라우저에서 같은 시드·같은 뷰를 두 티어로 찍어 비교했다(콘솔 에러 0):
+
+- `--quality=high` → 캐릭터·바위의 **긴 그림자 있음** (`playtest-out/q-high/`)
+- `--quality=minimum` → **그림자 없음**, 외곽선·블룸·피해 숫자는 그대로 (`playtest-out/q-min/`)
+
+사다리가 실제 화면을 바꾸고, 룩은 지켜진다는 걸 눈으로 확인했다.
+
+#### 남은 레퍼런스 격차
+
+`lighting.js`(절차적 하늘 + 지평선 맞춤 안개), LOD, 절차적 텍스처 생성기
+(2048px albedo + 1024px 하이트필드 → 노멀/러프니스). 그리고 이번에 API 만 만들고
+호출자가 없는 `reportSustainedOverload()` — 프레임 예산을 계속 놓칠 때 자동 티어를
+한 칸 내리는 governor 는 프레임 타이머가 필요해 아직 안 붙였다.
+
+수정 파일: `systems/quality.ts`(신규), `systems/render.ts`, `systems/post.ts`,
+`systems/combatVfx.ts`, `systems/decals.ts`, `tools/playtest/views.mjs`,
+`tests/quality.test.ts`(신규). 전부 내 소유 파일이다.
+
+---
+
+## Vesperfall 레퍼런스 기반 작업 인계 (2026-08-28, Codex)
+
+새 레퍼런스의 핵심은 모델 하나가 아니라 **전투·에셋·HUD·사운드·저장·검증을
+하나의 플레이어-facing 루프로 통합하는 방식**이다. 상세 인계는
+[`docs/VESPERFALL_REFERENCE_HANDOFF.md`](./VESPERFALL_REFERENCE_HANDOFF.md)를 따른다.
+
+### Codex 시스템 작업
+
+- `charger`에 `windup → active → recovery` 행동 계약을 추가했다.
+- windup 중 방향을 고정하고, 피격 경직으로 취소한다.
+- active에서는 벽을 고려한 직선 이동과 실제 진행 경로 기준의 단일 접촉만 허용한다.
+- `enemyAction` 이벤트에 행동 종류·인스턴스·단계·방향을 보존한다.
+- 첫 버전은 기존 `bossTelegraph` 표현 훅을 재사용해 Claude가 즉시 텔레그래프를 연결할 수 있다.
+- `tests/charger.test.ts` 4건을 추가했다.
+
+### Claude 작업 요청
+
+P0는 charger의 방향성 텔레그래프·돌진 잔상·충돌 스파크·전용 사운드 연결과
+실제 에셋 카탈로그 작성이다. 이후 갱도 시각 세로 슬라이스, 스킬별 동작·VFX·사운드,
+보스 차별화, HUD 진행 상태를 순서대로 진행한다.
+
+공통 완료 조건은 갱도 입구부터 보스 처치·보상·마을 귀환까지 실제 입력으로 닫히고,
+동일 seed에서 시스템 결과와 리뷰 장면이 재현되는 것이다.
+
+### Codex — S5 정예 수식어·돌격 브레이크 보강 (2026-08-28)
+
+- `spawnEnemy(..., isElite)`에 정예 수식을 실제 적용했습니다: HP ×1.75, 피해 ×1.25,
+  공격 쿨다운 ×0.9, XP ×2. 정예는 기존 `EnemyKind`와 분리된 수식어로 유지됩니다.
+- 보스가 아닌 정예 생명체에는 브레이크 게이지 60을 부여하고, 정예 `charger`의
+  windup 동안 브레이크 창을 열도록 했습니다. 일반 돌격병과 보스 고유 게이지는
+  덮어쓰지 않습니다.
+- `EnemyActionPayload.elite` 및 `CombatEvent.elite`를 연결했습니다. Claude는 이를
+  이용해 정예 돌격의 예고·발동·회복 표현을 일반 돌격과 구분할 수 있습니다.
+- 회귀: 정예·돌격 6건, 전체 테스트 39파일·419건, 타입체크, 시나리오 3파일·5건,
+  빌드 통과. 브라우저와 dev 서버는 실행하지 않았습니다.
+- 다음 작업: Claude가 정예 이벤트의 방향성 텔레그래프·돌진 잔상·충돌 스파크·전용
+  사운드를 실제 입력으로 검증합니다. 이후 S6 보스 시스템 분리 또는 리드 승인된
+  다음 시스템 패키지를 시작합니다.
+
+### Codex — S6 보스 패턴 판정 데이터 일원화 (2026-08-28)
+
+- `systems/boss.ts`의 slam/charge 판정이 `content/patterns.ts`의 예고 시간·범위·폭·
+  피해·속도 데이터를 직접 사용하도록 정리했습니다. 기존 `BOSS` 상수는 fallback과
+  호환 테스트용으로만 남겼습니다.
+- `BossComp.activePatternId`를 추가해 현재 패턴을 표현·계측 계층에 명시적으로 전달합니다.
+- 보스 사망 시 텔레그래프를 즉시 제거하고, 브레이크 취소 시 현재 패턴 식별자를 정리합니다.
+- 패턴별 cooldown은 이번 패키지에서 적용하지 않았습니다. 기존 공통 간격 2.2초를
+  유지하지 않으면 슬라이스 보스 시나리오에서 플레이어 사망 회귀가 발생하므로,
+  밸런스 관측과 함께 별도 조정 대상으로 남겼습니다.
+- 검증: 전체 테스트 39파일·419건, 타입체크, 시나리오 5건, 프로덕션 빌드 통과.
+- Claude는 `activePatternId`를 기준으로 보스별 텔레그래프·HUD 표현을 연결하면 됩니다.
+
+### Codex — S6 순수 보스 로직 모듈 분리 (2026-08-28)
+
+- `systems/bossLogic.ts`를 추가해 패턴 조회와 보스 페이즈 전이를 Three.js·DOM·HUD 없는
+  순수 모듈로 분리했습니다.
+- `systems/boss.ts`는 기존 텔레그래프·피해·표현을 유지하면서 순수 모듈을 소비하고,
+  기존 호출부 호환을 위해 `nextBossPhase`를 재-export합니다.
+- `tests/boss.test.ts`의 상태 전이 검증을 순수 모듈 대상으로 옮겨 렌더러 초기화와
+  무관하게 테스트할 수 있게 했습니다.
+- 보스 15건, 시나리오 5건, 전체 419건, 타입체크·빌드를 단일 프로세스로 순차 통과했습니다.
+  브라우저·dev 서버는 실행하지 않았습니다.
+- 다음 시각 작업에서 Claude가 `activePatternId`·`phase`를 소비합니다. Three.js 표현 코드의
+  추가 분리는 파일 경계 합의 후 별도 `bossVisuals.ts`로 진행하며, 이번에는 `boss.ts`의
+  시각 코드를 이동하지 않았습니다.
+
+### Codex — S7 encounter 진행·보상 중복 방지·안전 저장 계약 (2026-08-28)
+
+- `src/core/runState.ts`에 encounter 완료·보상 수령·버전 직렬화 계약을 추가했습니다.
+- 보스 처치가 `ZoneDefinition.encounterId`를 완료 처리하고, 완료된 존에 재진입하면
+  적·정예·보스를 다시 생성하지 않습니다. 보스 보상도 encounter당 한 번만 굴립니다.
+- `src/core/saveState.ts`는 플레이어 위치·체력·레벨·경험치·장비·인벤토리·쿨다운과
+  run progress를 검증 가능한 JSON 스냅샷으로 만들고 복원합니다.
+- `src/systems/persistence.ts`는 전투 엔티티를 저장하지 않는 현재 정책에 맞춰 마을
+  안전 지점 저장만 허용하는 `saveGame`/`loadGame` API를 제공합니다.
+- 검증: 신규 테스트 10건, 전체 43파일·429건, 타입체크 통과. 모두 단일 프로세스로
+  순차 실행했으며 브라우저·dev 서버는 실행하지 않았습니다. 빌드는 소스 변환까지
+  성공했으나 기존 `dist`와 별도 출력 폴더가 파일시스템 잠금으로 생성되지 않았습니다.
+- Claude 후속 작업: 저장·불러오기 입력과 HUD 메시지를 연결합니다. 중간 던전 저장은
+  적·투사체·소품 상태 계약을 추가하기 전까지 열지 않습니다.

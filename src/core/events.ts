@@ -1,6 +1,6 @@
-import type { Entity, SkillCastPhase, SkillId, Vec2, Vec3 } from "./world"
+import type { Entity, EnemyActionId, EnemyActionPhase, SkillCastPhase, SkillId, Vec2, Vec3 } from "./world"
 
-export type GameplayEventType = "damageResolved" | "skillCast" | "propBreak"
+export type GameplayEventType = "damageResolved" | "skillCast" | "enemyAction" | "propBreak"
 
 export interface DamageResolvedPayload {
   source: Entity
@@ -38,6 +38,25 @@ export interface SkillCastEvent {
   payload: SkillCastPayload
 }
 
+export interface EnemyActionPayload {
+  actionId: EnemyActionId
+  instanceId: number
+  phase: EnemyActionPhase
+  actor: Entity
+  elite: boolean
+  position: Vec3
+  yaw: number
+  direction: Vec2
+  target?: Entity
+}
+
+export interface EnemyActionEvent {
+  sequence: number
+  type: "enemyAction"
+  simulationTime: number
+  payload: EnemyActionPayload
+}
+
 export interface PropBreakPayload {
   prop: Entity
   propKind: string
@@ -54,16 +73,17 @@ export interface PropBreakEvent {
   payload: PropBreakPayload
 }
 
-export type GameplayEvent = DamageResolvedEvent | SkillCastEvent | PropBreakEvent
+export type GameplayEvent = DamageResolvedEvent | SkillCastEvent | EnemyActionEvent | PropBreakEvent
 
 export interface GameplayEventBuffer {
   nextSequence: number
   nextCastId: number
+  nextActionId: number
   pending: GameplayEvent[]
 }
 
 export function createGameplayEventBuffer(): GameplayEventBuffer {
-  return { nextSequence: 1, nextCastId: 1, pending: [] }
+  return { nextSequence: 1, nextCastId: 1, nextActionId: 1, pending: [] }
 }
 
 export function emitDamageResolved(
@@ -87,6 +107,19 @@ export function emitSkillCast(
   buffer.pending.push({
     sequence: buffer.nextSequence++,
     type: "skillCast",
+    simulationTime,
+    payload,
+  })
+}
+
+export function emitEnemyAction(
+  buffer: GameplayEventBuffer,
+  simulationTime: number,
+  payload: EnemyActionPayload,
+): void {
+  buffer.pending.push({
+    sequence: buffer.nextSequence++,
+    type: "enemyAction",
     simulationTime,
     payload,
   })

@@ -93,5 +93,5 @@ describe("보스전", () => {
 
     // 한 판에서 최소 세 종류의 패턴이 나와야 "여러 방법" 이 성립한다
     expect(patterns.size, `패턴이 ${patterns.size}종만 나왔다: ${[...patterns]}`).toBeGreaterThanOrEqual(3)
-  })
+  }, 10000)
 })

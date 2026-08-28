@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest"
-import { nextBossPhase, BOSS } from "../src/systems/boss"
+import { BOSS } from "../src/systems/boss"
+import { nextBossPhase } from "../src/systems/bossLogic"
 import { pointInPath } from "../src/systems/combat"
 import type { BossComp } from "../src/core/world"
 

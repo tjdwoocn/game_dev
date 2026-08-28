@@ -6,6 +6,7 @@ import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js"
 import { FXAAPass } from "three/examples/jsm/postprocessing/FXAAPass.js"
 import type { OutlineEffect } from "three/examples/jsm/effects/OutlineEffect.js"
 import { THEME } from "../content/theme"
+import { getPreset } from "./quality"
 
 /**
  * 포스트 프로세싱 체인.
@@ -60,6 +61,8 @@ class OutlineRenderPass extends Pass {
 
 let composer: EffectComposer | null = null
 let bloomPass: UnrealBloomPass | null = null
+/** 블룸 체인의 내부 해상도. 리사이즈 때 같은 배율을 다시 적용해야 한다. */
+let bloomResolution: THREE.Vector2 | null = null
 
 /**
  * 체인을 만든다. 블룸이 꺼져 있으면 컴포저를 아예 만들지 않는다 —
@@ -73,6 +76,7 @@ export function createPostChain(
 ): boolean {
   if (!THEME.bloom.enabled) return false
 
+  const quality = getPreset()
   const size = renderer.getDrawingBufferSize(new THREE.Vector2())
   // AA 는 SMAA(풀스크린 패스 3장) 대신 **컴포저 타깃의 MSAA** 로 처리한다.
   // SMAA 를 넣었을 때 저각 갱도에서 16.1ms → 20.6ms 였다. MSAA 는 래스터 단계에서
@@ -80,14 +84,18 @@ export function createPostChain(
   // 잡아도 충분하고, 그건 정확히 MSAA 가 잘하는 일이다.
   const target = new THREE.WebGLRenderTarget(size.x, size.y, {
     type: THREE.HalfFloatType, // 선형 HDR — 블룸 임계값이 1을 넘는 픽셀만 잡으려면 필요하다
+    samples: quality.msaaSamples, // 티어가 정한다. 0 이면 MSAA 없이 래스터한다.
   })
   composer = new EffectComposer(renderer, target)
   composer.setSize(size.x, size.y)
 
   composer.addPass(new OutlineRenderPass(scene, camera, outline))
 
+  // 블룸을 **끄지 않고** 내부 해상도만 낮춘다. 발광은 이 게임의 룩이라
+  // 레버가 아니다 — 티어가 깎는 건 곱기이지 존재 여부가 아니다.
+  bloomResolution = size.clone().multiplyScalar(quality.bloomScale).round()
   bloomPass = new UnrealBloomPass(
-    size.clone(),
+    bloomResolution,
     THEME.bloom.strength,
     THEME.bloom.radius,
     THEME.bloom.threshold,
@@ -97,7 +105,7 @@ export function createPostChain(
   // ACES + sRGB 는 여기서 한 번에 적용된다.
   composer.addPass(new OutputPass())
   // AA 는 마지막. FXAA 는 sRGB 공간에서 도므로 OutputPass **뒤**여야 한다.
-  if (THEME.bloom.fxaa) composer.addPass(new FXAAPass())
+  if (THEME.bloom.fxaa && quality.fxaa) composer.addPass(new FXAAPass())
   return true
 }
 
@@ -111,7 +119,11 @@ export function renderPost(): void {
 
 export function resizePost(width: number, height: number): void {
   composer?.setSize(width, height)
-  bloomPass?.setSize(width, height)
+  // 블룸은 화면 크기가 아니라 **티어 배율을 적용한 크기**로 되돌린다.
+  // 그냥 width/height 를 주면 리사이즈 한 번에 티어 설정이 조용히 풀린다.
+  const scale = getPreset().bloomScale
+  bloomPass?.setSize(Math.round(width * scale), Math.round(height * scale))
+  bloomResolution?.set(Math.round(width * scale), Math.round(height * scale))
 }
 
 /** 존을 옮기거나 테마를 바꿀 때 초기화한다. */
@@ -119,4 +131,5 @@ export function disposePostChain(): void {
   composer?.dispose()
   composer = null
   bloomPass = null
+  bloomResolution = null
 }

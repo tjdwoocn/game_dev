@@ -33,6 +33,9 @@ const EVENT_TEXT: Record<CombatEventKind, string> = {
   skillWindup: "스킬 준비",
   skillRelease: "스킬 발동",
   bossTelegraph: "보스가 자세를 잡는다",
+  enemyWindup: "적이 돌진 자세를 잡는다",
+  enemyRelease: "적이 돌진한다",
+  enemyRecovery: "적이 돌진 후 자세를 추스른다",
 }
 
 function who(e: Entity | undefined): string {

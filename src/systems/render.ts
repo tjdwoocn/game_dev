@@ -4,6 +4,7 @@ import { instantiate, type ModelRegistry } from "../core/assets"
 import { dressEnemy } from "./enemyVisuals"
 import { dressLoot } from "./lootVisuals"
 import { createPostChain, hasPostChain, renderPost, resizePost } from "./post"
+import { getPreset, probeRenderer } from "./quality"
 import { OutlineEffect } from "three/examples/jsm/effects/OutlineEffect.js"
 import { THEME } from "../content/theme"
 import type { GameWorld, ModelKind, Rarity, Resources } from "../core/world"
@@ -29,6 +30,12 @@ const cameraRig = createCameraRig()
 let outlineEffect: OutlineEffect | null = null
 let shadowSun: THREE.DirectionalLight | null = null
 let mainRenderer: THREE.WebGLRenderer | null = null
+/**
+ * 실제로 적용된 그림자 값. 테마가 원하는 값과 **티어가 허락한 값**이 다르므로
+ * 한 곳에 모아 둔다. `followSun` 의 텍셀 스냅이 이 값을 봐야 하는데,
+ * 여기가 어긋나면 그림자 경계가 매 프레임 지글거린다.
+ */
+let activeShadow = { extent: THEME.shadow.extent, mapSize: THEME.shadow.mapSize }
 
 /** 실시간 시각 기반의 결정적 노이즈. Math.random을 쓰지 않아 리플레이가 재현된다. */
 function pseudoNoise(t: number, seed: number): number {
@@ -193,13 +200,12 @@ export function applyShadowFlags(root: THREE.Object3D, cast: boolean, receive: b
  * 그림자 텍셀 크기 단위로 스냅해 그 떨림을 없앤다.
  */
 function followSun(sun: THREE.DirectionalLight, x: number, z: number): void {
-  const sh = THEME.shadow
-  const texel = (sh.extent * 2) / sh.mapSize
+  const texel = (activeShadow.extent * 2) / activeShadow.mapSize
   const sx = Math.round(x / texel) * texel
   const sz = Math.round(z / texel) * texel
   const [ox, oy, oz] = THEME.directional.position
   const len = Math.hypot(ox, oy, oz) || 1
-  const dist = sh.extent * 1.8
+  const dist = activeShadow.extent * 1.8
   sun.position.set(sx + (ox / len) * dist, (oy / len) * dist, sz + (oz / len) * dist)
   sun.target.position.set(sx, 0, sz)
   sun.target.updateMatrixWorld()
@@ -237,7 +243,10 @@ export function initRender(mount: HTMLElement) {
     stencil: false,
   })
   renderer.setSize(window.innerWidth, window.innerHeight)
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+  // 티어보다 먼저 GPU 를 조사한다 — 아래 모든 소비자가 판정 결과를 읽는다.
+  probeRenderer(renderer)
+  const quality = getPreset()
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, quality.maxPixelRatio))
   // r155 이후 three 는 물리 기반 조명이 기본이다. 출력 색공간과 톤 매핑을 명시하지 않으면
   // 밝은 부분이 그대로 흰색으로 잘려 색이 사라진다. ACES 는 하이라이트를 눌러 색을 남긴다.
   renderer.outputColorSpace = THREE.SRGBColorSpace
@@ -245,7 +254,7 @@ export function initRender(mount: HTMLElement) {
   renderer.toneMappingExposure = THEME.tone.exposure
   // **이 줄이 들어오기 전까지 이 게임에는 그림자가 하나도 없었다.**
   // 캐릭터가 바닥에 붙어 보이지 않던 가장 큰 원인이다.
-  renderer.shadowMap.enabled = THEME.shadow.enabled
+  renderer.shadowMap.enabled = THEME.shadow.enabled && quality.shadowEnabled
   renderer.shadowMap.type = THREE.PCFSoftShadowMap
   mount.appendChild(renderer.domElement)
 
@@ -267,17 +276,19 @@ export function initRender(mount: HTMLElement) {
   // 그림자 카메라는 던전 전체가 아니라 **플레이어 주변만** 덮는다. 맵 전체를 덮으면
   // 같은 해상도로 훨씬 넓은 면적을 담당하게 되어 텍셀이 굵어지고 윤곽이 뭉갠다.
   // 광원은 매 프레임 플레이어를 따라 옮긴다(renderSystem 아래쪽).
-  if (THEME.shadow.enabled) {
+  if (THEME.shadow.enabled && quality.shadowEnabled) {
     const sh = THEME.shadow
+    // 해상도와 범위는 티어가, 편향·흐림 같은 룩 파라미터는 테마가 정한다.
+    activeShadow = { extent: quality.shadowExtent, mapSize: quality.shadowMapSize }
     dir.castShadow = true
-    dir.shadow.mapSize.set(sh.mapSize, sh.mapSize)
+    dir.shadow.mapSize.set(activeShadow.mapSize, activeShadow.mapSize)
     const cam = dir.shadow.camera
-    cam.left = -sh.extent
-    cam.right = sh.extent
-    cam.top = sh.extent
-    cam.bottom = -sh.extent
+    cam.left = -activeShadow.extent
+    cam.right = activeShadow.extent
+    cam.top = activeShadow.extent
+    cam.bottom = -activeShadow.extent
     cam.near = 0.5
-    cam.far = sh.extent * 3.2
+    cam.far = activeShadow.extent * 3.2
     cam.updateProjectionMatrix()
     dir.shadow.bias = sh.bias
     dir.shadow.normalBias = sh.normalBias

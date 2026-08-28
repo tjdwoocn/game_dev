@@ -4,6 +4,7 @@ import { parseMap, type DungeonMap } from "../content/map"
 import { spawnEnemy } from "../content/enemies"
 import { PARTY_CONFIG } from "../content/party"
 import type { BossComp, Entity, GameWorld, Resources, Vec2 } from "../core/world"
+import { createRunProgress, isEncounterCompleted } from "../core/runState"
 import { buildMapMeshes } from "./render"
 import { spawnDestructibles } from "./destructibles"
 
@@ -109,12 +110,16 @@ export function enterZone(
   const player = world.with("player", "transform", "health").entities[0]
   if (!def || !layout || !player) return false
 
+  const encounterComplete = isEncounterCompleted(
+    res.runProgress ?? (res.runProgress = createRunProgress()),
+    def.encounterId,
+  )
   const map = parseMap(layout, def.eliteCells ?? [])
   clearTransientEntities(world, res)
 
   res.map = map
   res.zoneId = targetZoneId
-  res.flags.bossDefeated = false
+  res.flags.bossDefeated = encounterComplete && def.hasBoss
   runtime.currentZoneId = targetZoneId
   runtime.requestedZoneId = null
   runtime.transitionLockUntil = res.time.now + TRANSITION_LOCK
@@ -131,11 +136,15 @@ export function enterZone(
   player.transform.yaw = 0
   resetCompanions(world, player)
 
-  spawnDestructibles(world, map, def.mapId)
-  for (const spawnPoint of map.spawns) {
-    spawnEnemy(world, spawnPoint.kind, spawnPoint.x, spawnPoint.z, spawnPoint.isElite)
+  // 완료한 encounter는 재진입해도 전투·정예·보스를 다시 만들지 않는다.
+  // 맵 메시지는 그대로 다시 만들지만, 진행 상태와 보상은 중복되지 않는다.
+  if (!encounterComplete) {
+    spawnDestructibles(world, map, def.mapId)
+    for (const spawnPoint of map.spawns) {
+      spawnEnemy(world, spawnPoint.kind, spawnPoint.x, spawnPoint.z, spawnPoint.isElite)
+    }
+    spawnBoss(world, map, def)
   }
-  spawnBoss(world, map, def)
 
   // 모든 진입 경로(물리 출구·문지기·NPC·개발 훅)에서 도착 칸을 잠근다.
   // 보스 맵은 P와 귀환 출구가 같은 칸일 수 있어, 이 보호가 없으면 진입 즉시 되돌아간다.

@@ -2,6 +2,8 @@ import { ENEMY_DEFS, type EnemyDef } from "../content/enemies"
 import type { AIState, Entity, GameWorld, Resources, Vec2 } from "../core/world"
 import { fireProjectile, meleeStrike } from "./combat"
 import { selectPartyTarget } from "./party"
+import { emitEnemyAction } from "../core/events"
+import { beginBreakWindow } from "./break"
 
 export interface AIContext {
   distToPlayer: number
@@ -47,6 +49,96 @@ function clearMoveTarget(world: GameWorld, e: Entity) {
   if (e.moveTarget) world.removeComponent(e, "moveTarget")
 }
 
+function stopMoving(world: GameWorld, e: Entity): void {
+  clearMoveTarget(world, e)
+  if (e.path) world.removeComponent(e, "path")
+}
+
+function emitChargeAction(res: Resources, e: Entity): void {
+  const action = e.enemyAction
+  const p = e.transform?.position
+  if (!action || !p || !e.transform) return
+  emitEnemyAction(res.events, res.time.now, {
+    actionId: action.actionId,
+    instanceId: action.instanceId,
+    phase: action.phase,
+    actor: e,
+    elite: !!e.enemy?.isElite,
+    position: { ...p },
+    yaw: e.transform.yaw,
+    direction: { ...action.dir },
+    target: action.target,
+  })
+}
+
+function startCharge(world: GameWorld, res: Resources, e: Entity, target: Entity, def: EnemyDef): boolean {
+  const charge = def.charge
+  const p = e.transform?.position
+  const tp = target.transform?.position
+  if (!charge || !p || !tp || e.enemyAction) return false
+  const dx = tp.x - p.x
+  const dz = tp.z - p.z
+  const length = Math.hypot(dx, dz)
+  if (length <= 1e-6) return false
+
+  e.transform!.yaw = Math.atan2(dx, dz)
+  e.attack!.readyAt = res.time.now + e.attack!.cooldown
+  stopMoving(world, e)
+  world.addComponent(e, "enemyAction", {
+    actionId: "charge",
+    instanceId: res.events.nextActionId++,
+    phase: "windup",
+    phaseStartedAt: res.time.now,
+    phaseUntil: res.time.now + charge.windup,
+    origin: { x: p.x, z: p.z },
+    dir: { x: dx / length, z: dz / length },
+    target,
+    hasHit: false,
+  })
+  // 정예 돌격병은 windup 동안 브레이크 창을 열어 위험 예고를 반격 기회로도 만든다.
+  // 일반 돌격병에는 breakable이 없으므로 기존 행동 규칙은 그대로 유지된다.
+  if (e.enemy?.isElite && e.breakable) beginBreakWindow(e.breakable, res.time.now, charge.windup)
+  emitChargeAction(res, e)
+  return true
+}
+
+/**
+ * 돌진의 시간축을 진행한다. windup은 플레이어가 읽고 끊을 수 있는 시간이며,
+ * active에서만 movement/combat가 실제 돌진과 접촉을 처리한다.
+ */
+function advanceEnemyAction(world: GameWorld, res: Resources, e: Entity, def: EnemyDef): boolean {
+  const action = e.enemyAction
+  const charge = def.charge
+  const enemy = e.enemy
+  if (!action || !charge || !enemy) return false
+
+  if (res.time.now < action.phaseUntil) {
+    stopMoving(world, e)
+    return true
+  }
+
+  if (action.phase === "windup") {
+    action.phase = "active"
+    action.phaseStartedAt = res.time.now
+    action.phaseUntil = res.time.now + charge.active
+    emitChargeAction(res, e)
+    return true
+  }
+  if (action.phase === "active") {
+    action.phase = "recovery"
+    action.phaseStartedAt = res.time.now
+    action.phaseUntil = res.time.now + charge.recovery
+    stopMoving(world, e)
+    emitChargeAction(res, e)
+    return true
+  }
+
+  world.removeComponent(e, "enemyAction")
+  enemy.state = "attack"
+  enemy.stateSince = res.time.now
+  return false
+}
+
 export function aiSystem(world: GameWorld, res: Resources, dt: number): void {
   void dt
   for (const e of world.with("enemy", "transform", "health")) {
@@ -60,15 +152,19 @@ export function aiSystem(world: GameWorld, res: Resources, dt: number): void {
     const playerAlive = !!target
 
     if (e.hitstun && res.time.now < e.hitstun.until) {
+      if (e.enemyAction) world.removeComponent(e, "enemyAction")
       if (e.moveTarget) world.removeComponent(e, "moveTarget")
       continue
     }
     if (e.hitstun) world.removeComponent(e, "hitstun")
 
     if (e.stunned) {
+      if (e.enemyAction) world.removeComponent(e, "enemyAction")
       if (e.moveTarget) world.removeComponent(e, "moveTarget")
       continue
     }
+
+    if (advanceEnemyAction(world, res, e, def)) continue
 
     const prev = e.enemy.state
     const next = aiTransition(prev, { distToPlayer, distToHome, def, playerAlive })
@@ -84,6 +180,12 @@ export function aiSystem(world: GameWorld, res: Resources, dt: number): void {
         break
       case "chase": {
         if (!pp) break
+        if (e.enemy.kind === "charger" && def.charge && e.attack && res.time.now >= e.attack.readyAt) {
+          const charge = def.charge
+          if (distToPlayer >= charge.minRange && distToPlayer <= charge.maxRange) {
+            if (startCharge(world, res, e, target!, def)) break
+          }
+        }
         setMoveTarget(world, e, { x: pp.x, z: pp.z })
         break
       }
@@ -100,6 +202,12 @@ export function aiSystem(world: GameWorld, res: Resources, dt: number): void {
           clearMoveTarget(world, e)
         }
         if (e.attack && playerAlive && res.time.now >= e.attack.readyAt) {
+          if (e.enemy.kind === "charger" && def.charge) {
+            const charge = def.charge
+            if (distToPlayer >= charge.minRange && distToPlayer <= charge.maxRange) {
+              if (startCharge(world, res, e, target!, def)) break
+            }
+          }
           e.attack.readyAt = res.time.now + e.attack.cooldown
           if (e.enemy.kind === "archer") {
             fireProjectile(world, e, { x: pp.x, z: pp.z }, target)

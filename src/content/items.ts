@@ -26,7 +26,11 @@ export const PLAYER_STAT_LIMITS = {
   lifeOnKill: 30,
 } as const
 
-let nextItemId = 1
+let fallbackNextItemId = 1
+
+function allocateFallbackItemId(): number {
+  return fallbackNextItemId++
+}
 
 export function rollRarity(rng: () => number, opts?: { guaranteed?: Rarity }): Rarity {
   if (opts?.guaranteed) return opts.guaranteed
@@ -73,7 +77,11 @@ export function rollAffixes(rng: () => number, rarity: Rarity): Affix[] {
   return affixes
 }
 
-export function rollItem(rng: () => number, level: number, opts?: { guaranteed?: Rarity }): ItemInstance {
+export function rollItem(
+  rng: () => number,
+  level: number,
+  opts?: { guaranteed?: Rarity; id?: number },
+): ItemInstance {
   const rarity = rollRarity(rng, opts)
   const slots: Slot[] = ["weapon", "armor", "ring"]
   const slot = slots[Math.floor(rng() * slots.length)] ?? "weapon"
@@ -96,7 +104,7 @@ export function rollItem(rng: () => number, level: number, opts?: { guaranteed?:
   }
 
   return {
-    id: nextItemId++,
+    id: opts?.id ?? allocateFallbackItemId(),
     name: `${RARITY_PREFIX[rarity]} ${SLOT_NOUN[slot]}`,
     slot,
     rarity,

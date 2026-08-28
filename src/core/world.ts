@@ -4,6 +4,7 @@ import type { DungeonMap } from "../content/map"
 import type { Hud } from "../ui/hud"
 import type { HitstopState } from "./hitstop"
 import type { GameplayEventBuffer } from "./events"
+import type { RunProgress } from "./runState"
 
 export type Vec3 = { x: number; y: number; z: number }
 export type Vec2 = { x: number; z: number }
@@ -28,6 +29,8 @@ export interface BufferedSkill {
 
 export type EnemyKind = "warrior" | "archer" | "charger" | "boss"
 export type AIState = "idle" | "chase" | "attack" | "return"
+export type EnemyActionId = "charge"
+export type EnemyActionPhase = "windup" | "active" | "recovery"
 export type ModelKind =
   | "player" | "warrior" | "archer" | "charger" | "boss" | "projectile" | "loot"
   | "companion-tank" | "companion-striker" | "companion-support"
@@ -116,6 +119,25 @@ export interface CompanionComp {
   supportReadyAt: number
 }
 
+/**
+ * 적 전용 행동 상태. 플레이어 스킬의 `ActionState`와 분리해 둔다.
+ *
+ * 행동의 시간축은 AI가 결정하고 movement/combat가 각각 이동·접촉을 담당한다.
+ * 이렇게 하면 텔레그래프와 실제 판정이 같은 시뮬레이션 시각을 공유하면서도
+ * Three.js 표현 코드가 상태를 추측할 필요가 없다.
+ */
+export interface EnemyActionState {
+  actionId: EnemyActionId
+  instanceId: number
+  phase: EnemyActionPhase
+  phaseStartedAt: number
+  phaseUntil: number
+  origin: Vec2
+  dir: Vec2
+  target?: Entity
+  hasHit: boolean
+}
+
 export type BossPhase =
   | "idle"
   | "slamTelegraph" | "slamming"
@@ -127,6 +149,8 @@ export type BossPhase =
 export interface BossComp {
   phase: BossPhase
   phaseUntil: number
+  /** 현재 실행 중인 패턴. 표현·계측 계층이 페이즈 문자열을 역추론하지 않게 한다. */
+  activePatternId?: string
   slamCount: number
   nextPatternAt: number
   chargeDir: Vec2
@@ -145,7 +169,8 @@ export interface Entity {
   /** moveTarget까지의 길찾기 경로. movement 시스템이 관리한다. */
   path?: { nodes: Vec2[]; index: number; goal: Vec2; stuck: number }
   health?: { current: number; max: number }
-  dead?: { at: number }
+  /** 사망 시각과 선택적 부활 예약. 게임 인스턴스 전역 타이머를 두지 않는다. */
+  dead?: { at: number; respawnAt?: number }
   attack?: {
     damage: number
     range: number
@@ -168,6 +193,7 @@ export interface Entity {
   attackIntent?: { target: Entity }
   skillIntent?: { skill: SkillId; point: Vec2 }
   action?: ActionState
+  enemyAction?: EnemyActionState
   skillBuffer?: BufferedSkill
   guarding?: { until: number; damageMultiplier: number }
   enemy?: {
@@ -222,6 +248,10 @@ export interface Resources {
   hud: Hud
   flags: { bossDefeated: boolean }
   events: GameplayEventBuffer
+  /** 존을 오가도 유지되는 encounter 완료·보상 수령 상태. 첫 사용 시 생성된다. */
+  runProgress?: RunProgress
+  /** 같은 seed의 게임 인스턴스가 같은 아이템 식별자를 갖도록 하는 런타임 카운터. */
+  nextItemId?: number
 }
 
 export const createWorld = () => new World<Entity>()

@@ -7,6 +7,9 @@ import { applyBreakDamage, BREAK, isFocused, triggerBreak } from "./break"
 import { applyHitstun, applyKnockback, moveWithWalls } from "./movement"
 import { emitDamageResolved, emitPropBreak } from "../core/events"
 import { rollPropDrops } from "./destructibles"
+import { ENEMY_DEFS } from "../content/enemies"
+import { getZone } from "../content/zones"
+import { completeEncounter, createRunProgress } from "../core/runState"
 
 const RAGE_PER_HIT = 10
 const CORPSE_LINGER = 1.2
@@ -21,8 +24,6 @@ const KNOCKBACK = {
   companion: { speed: 1.4, duration: 0.1 },
   enemy: { speed: 4.8, duration: 0.16 },
 } as const
-
-let playerRespawnAt: number | null = null
 
 export function effectiveAttackCooldown(baseCooldown: number, attackSpeedPct = 0): number {
   return baseCooldown / (1 + Math.max(0, attackSpeedPct) / 100)
@@ -142,9 +143,20 @@ export function kill(world: GameWorld, res: Resources, e: Entity): void {
       e.enemy.kind === "boss" ? HITSTOP.bossDefeatedMs : HITSTOP.enemyDefeatedMs,
     )
   }
-  world.addComponent(e, "dead", { at: res.time.now })
+  world.addComponent(e, "dead", {
+    at: res.time.now,
+    ...(e.player ? { respawnAt: res.time.now + PLAYER_RESPAWN_DELAY } : {}),
+  })
   if (e.moveTarget) world.removeComponent(e, "moveTarget")
   if (e.attackIntent) world.removeComponent(e, "attackIntent")
+  if (e.enemy?.kind === "boss") {
+    // 보스 처치는 현재 엔티티의 수명이 아니라 encounter 진행으로 기록한다.
+    // 그래야 마을에 다녀온 뒤 같은 보스와 보상이 다시 생성되지 않는다.
+    const encounterId = getZone(res.zoneId)?.encounterId
+    if (encounterId) {
+      completeEncounter(res.runProgress ?? (res.runProgress = createRunProgress()), encounterId)
+    }
+  }
   if (e.enemy) rollDrop(world, res, e)
   if (e.enemy?.kind === "boss") {
     res.flags.bossDefeated = true
@@ -153,7 +165,6 @@ export function kill(world: GameWorld, res: Resources, e: Entity): void {
     setTimeout(() => res.hud.setOverlay(null), 5000)
   }
   if (e.player) {
-    playerRespawnAt = res.time.now + PLAYER_RESPAWN_DELAY
     res.hud.setOverlay(`당신은 죽었습니다<div class="sub">잠시 후 입구에서 부활합니다</div>`)
   }
 }
@@ -324,6 +335,38 @@ function removeEntity(world: GameWorld, res: Resources, e: Entity) {
   world.remove(e)
 }
 
+/**
+ * 돌진의 접촉은 이동 경로의 현재 진행량으로 판정한다. 현재 위치까지만
+ * sweep하므로 벽에 막힌 돌진이 벽 너머의 플레이어를 맞히지 않는다.
+ */
+function resolveEnemyChargeContacts(world: GameWorld, res: Resources): void {
+  for (const e of world.with("enemy", "enemyAction", "transform", "health")) {
+    if (e.dead || e.enemyAction.phase !== "active" || e.enemyAction.hasHit) continue
+    const charge = ENEMY_DEFS[e.enemy.kind].charge
+    const target = e.enemyAction.target
+    if (!charge || !target || target.dead || !target.transform) continue
+
+    const p = e.transform.position
+    const traveled = Math.hypot(p.x - e.enemyAction.origin.x, p.z - e.enemyAction.origin.z)
+    const targetPos = target.transform.position
+    // 원형 분리로 대상이 돌진 방향으로 살짝 밀릴 수 있다. 대상 반경과
+    // 공격자 반경만큼 sweep 끝을 열어 주되, 벽에 막힌 실제 진행량을
+    // 넘어서는 판정은 만들지 않는다.
+    const contactTravel = traveled + (target.radius ?? 0.4) + (e.radius ?? 0.4)
+    if (!pointInPath(
+      e.enemyAction.origin,
+      e.enemyAction.dir,
+      charge.halfWidth,
+      contactTravel,
+      targetPos,
+      target.radius ?? 0.4,
+    )) continue
+
+    e.enemyAction.hasHit = true
+    dealDamage(world, res, e, target, e.attack!.damage * charge.damageMultiplier)
+  }
+}
+
 export function combatSystem(world: GameWorld, res: Resources, dt: number): void {
   const now = res.time.now
   const player = world.with("player", "transform", "health").entities[0]
@@ -340,6 +383,8 @@ export function combatSystem(world: GameWorld, res: Resources, dt: number): void
     meleeStrike(world, res, player, playerAttackTargets(world))
     }
   }
+
+  resolveEnemyChargeContacts(world, res)
 
   // 1. 플레이어 기본 공격 (attackIntent)
   if (player && !player.dead && !player.hitstun && !player.action && player.attackIntent) {
@@ -397,8 +442,7 @@ export function combatSystem(world: GameWorld, res: Resources, dt: number): void
     if (e.player || e.companion) continue
     if (now - e.dead.at > CORPSE_LINGER) removeEntity(world, res, e)
   }
-  if (player?.dead && playerRespawnAt !== null && now >= playerRespawnAt) {
-    playerRespawnAt = null
+  if (player?.dead?.respawnAt !== undefined && now >= player.dead.respawnAt) {
     world.removeComponent(player, "dead")
     player.transform.position.x = res.map.playerSpawn.x
     player.transform.position.z = res.map.playerSpawn.z

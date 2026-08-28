@@ -13,7 +13,8 @@
  * ## 무엇이 "계약" 인가
  *
  *  1. **이름**이 있다. `mine_corridor` 는 언제 찍어도 같은 곳이다.
- *  2. **결정적**이다. `?seed=` 로 난수를 고정하고, 같은 경로로 같은 지점까지 간다.
+ *  2. **결정적**이다. `?seed=` 로 난수를, `?quality=` 로 렌더 티어를 고정하고,
+ *     같은 경로로 같은 지점까지 간다. 둘 중 하나라도 흔들리면 시트를 비교할 수 없다.
  *  3. **한 장으로 모인다.** 대조 시트가 있어야 "전보다 나아졌나" 를 판단할 수 있다.
  *
  * ## 쓰는 법
@@ -30,6 +31,12 @@ const OUT = process.argv.find((a) => a.startsWith("--out="))?.slice(6) ?? "playt
 const ONLY = process.argv.find((a) => a.startsWith("--only="))?.slice(7) ?? null
 const SEED = process.argv.find((a) => a.startsWith("--seed="))?.slice(7) ?? "20260828"
 const BASE = process.env.PLAYTEST_URL ?? "http://localhost:5173/"
+/**
+ * **티어를 고정한다.** 품질 자동 감지(systems/quality.ts)는 GPU 에 따라 해상도·그림자·
+ * 블룸을 바꾸므로, 고정하지 않으면 다른 기기에서 찍은 시트끼리 비교가 무의미해진다.
+ * 티어별 비교 샷이 필요하면 --quality=low 처럼 명시한다.
+ */
+const QUALITY = process.argv.find((a) => a.startsWith("--quality="))?.slice(10) ?? "high"
 /** 이미 찍어 둔 낱장으로 대조 시트만 다시 만든다. 시트 조판을 손볼 때 4분을 아낀다. */
 const SHEET_ONLY = process.argv.includes("--sheet-only")
 
@@ -179,7 +186,7 @@ if (wanted.length === 0) {
   process.exit(1)
 }
 
-console.log(`[스크린샷 계약] seed=${SEED} · 뷰 ${wanted.length}개`)
+console.log(`[스크린샷 계약] seed=${SEED} · 품질=${QUALITY} · 뷰 ${wanted.length}개`)
 const captured = []
 
 for (const view of SHEET_ONLY ? [] : wanted) {
@@ -188,7 +195,7 @@ for (const view of SHEET_ONLY ? [] : wanted) {
   const s = new GameSession()
   const started = Date.now()
   try {
-    await s.start({ url: `${BASE}?seed=${SEED}` })
+    await s.start({ url: `${BASE}?seed=${SEED}&quality=${QUALITY}` })
     await view.run(s)
     const png = await s.page.screenshot({ encoding: "base64" })
     writeFileSync(join(OUT, `${view.name}.png`), Buffer.from(png, "base64"))
@@ -222,7 +229,7 @@ if (captured.length > 0) {
   // 실어 보내면 브라우저가 알아서 디코드하므로 인자 직렬화 한계를 타지 않는다.
   const sheet = new GameSession()
   try {
-    await sheet.start({ url: `${BASE}?seed=${SEED}` })
+    await sheet.start({ url: `${BASE}?seed=${SEED}&quality=${QUALITY}` })
     const cards = captured
       .map(
         (c) =>

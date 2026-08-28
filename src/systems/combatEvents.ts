@@ -19,6 +19,7 @@ export type CombatEventKind =
   | "swing" | "hit" | "hitHeavy" | "crit" | "enemyDeath" | "playerHurt"
   | "lootDrop" | "lootPickup" | "breakOpen" | "breakSuccess"
   | "propBreak" | "levelUp" | "dash" | "whirlwind" | "skillWindup" | "skillRelease" | "bossTelegraph"
+  | "enemyWindup" | "enemyRelease" | "enemyRecovery"
 
 export interface CombatEvent {
   kind: CombatEventKind
@@ -35,6 +36,15 @@ export interface CombatEvent {
   skillId?: SkillId
   phase?: SkillCastPhase
   castId?: number
+  enemyActionId?: string
+  enemyActionInstanceId?: number
+  /** 정예 수식어를 표현 계층까지 보존한다. 종류와 티어를 시각적으로 조합할 때 쓴다. */
+  elite?: boolean
+  /**
+   * 이 피해를 일으킨 적이 그 순간 수행 중이던 행동. `playerHurt` 가 돌진 충돌인지
+   * 평타인지 갈라 준다 — 같은 "맞았다" 라도 몸으로 받은 돌진은 다른 소리여야 한다.
+   */
+  sourceActionId?: string
 }
 
 interface Prev {
@@ -113,6 +123,28 @@ export function collectCombatEvents(world: GameWorld, res: Resources): CombatEve
       events.push({ kind: "propBreak", at: event.payload.position, power: 1, entity: event.payload.prop })
       continue
     }
+    if (event.type === "enemyAction") {
+      // **보스 텔레그래프 훅 재사용을 끝냈다.** 첫 버전은 돌진 예고를 `bossTelegraph`
+      // 로 흘려보냈는데, 그러면 잡몹이 자세를 잡을 때마다 보스 경고음이 울린다 —
+      // 소리가 위협의 등급을 잘못 알려 준다. 세 단계를 각자의 종류로 분리하고
+      // 표현도 세 개를 따로 준다(예고 / 발동 / 회복).
+      const kind: CombatEventKind = event.payload.phase === "windup"
+        ? "enemyWindup"
+        : event.payload.phase === "active"
+          ? "enemyRelease"
+          : "enemyRecovery"
+      events.push({
+        kind,
+        at: event.payload.position,
+        yaw: event.payload.yaw,
+        power: attenuation(event.payload.position, playerPos),
+        entity: event.payload.actor,
+        enemyActionId: event.payload.actionId,
+        enemyActionInstanceId: event.payload.instanceId,
+        elite: event.payload.elite,
+      })
+      continue
+    }
     if (event.type !== "damageResolved") continue
     const { payload } = event
     explicitDamageTargets.add(payload.target)
@@ -133,6 +165,9 @@ export function collectCombatEvents(world: GameWorld, res: Resources): CombatEve
       amount: payload.amount,
       critical: payload.critical,
       focused: payload.focused,
+      // 같은 스텝 안에서 읽는다. aiSystem 은 이미 지나갔고 combatSystem 이 방금
+      // 발행했으므로, 돌진 접촉의 경우 가해자에게 `enemyAction` 이 아직 붙어 있다.
+      sourceActionId: payload.source.enemyAction?.actionId,
     })
   }
 

@@ -1,6 +1,7 @@
 import * as THREE from "three"
-import type { Resources } from "../core/world"
+import type { Resources, SkillId } from "../core/world"
 import type { CombatEvent, CombatEventKind } from "./combatEvents"
+import { texSize } from "./quality"
 
 /**
  * 전투 이펙트 — 검격 궤적, 충격 불꽃, 사망·브레이크 파문.
@@ -54,7 +55,9 @@ const pools: Record<SlotKind, Slot[]> = { slash: [], spark: [], ring: [], sweep:
 let sparkTex: THREE.Texture | null = null
 function getSparkTexture(): THREE.Texture | null {
   if (sparkTex) return sparkTex
-  const size = 64
+  // 저사양 티어에서는 절반 크기로 굽는다. 가운데가 밝은 원형 그라디언트라
+  // 해상도가 낮아도 형태가 무너지지 않는다.
+  const size = texSize(64)
   const cv = document.createElement("canvas")
   cv.width = cv.height = size
   const g = cv.getContext("2d")
@@ -192,12 +195,12 @@ interface Spec {
 }
 
 /** 이벤트별 연출. 값은 귀·눈으로 맞춘 것이라 의도를 주석에 남긴다. */
-const SLASH: Partial<Record<CombatEventKind, Spec>> = {
+export const SLASH: Partial<Record<CombatEventKind, Spec>> = {
   swing: { color: 0xfff2cc, life: 0.16, scale: 1.25, peak: 0.55 },
   dash: { color: 0xbfe4ff, life: 0.22, scale: 1.7, peak: 0.5 },
 }
 
-const SPARK: Partial<Record<CombatEventKind, Spec>> = {
+export const SPARK: Partial<Record<CombatEventKind, Spec>> = {
   // 일반 타격 — 짧고 따뜻하게. 자주 나므로 과하면 화면이 지저분해진다
   hit: { color: 0xffc06a, life: 0.26, scale: 1, peak: 1, size: 0.26, spread: 3.4 },
   // 집중 공격(브레이크 중) — 더 크고 밝게. "세게 들어갔다" 를 눈으로도 구분시킨다
@@ -206,9 +209,26 @@ const SPARK: Partial<Record<CombatEventKind, Spec>> = {
   enemyDeath: { color: 0xe8d8b8, life: 0.5, scale: 1, peak: 1, size: 0.34, spread: 4.2 },
   breakSuccess: { color: 0x9fe8ff, life: 0.6, scale: 1, peak: 1, size: 0.5, spread: 7 },
   whirlwind: { color: 0xffe0a0, life: 0.4, scale: 1, peak: 1, size: 0.3, spread: 6.2 },
+  // 치명타 — 가장 크고 가장 희게. 일반 타격(0.26)·집중(0.42)과 **입자 크기부터** 벌려 둔다.
+  // 난전에서는 색 차이보다 크기 차이가 먼저 읽힌다.
+  crit: { color: 0xfff4d8, life: 0.44, scale: 1, peak: 1, size: 0.58, spread: 7.6 },
+  // 소품 파괴 — 불꽃이 아니라 **파편**이라 차갑고 탁한 색이다.
+  // 전투 타격과 같은 색이면 "적을 때렸다" 로 오인된다.
+  propBreak: { color: 0xbba98a, life: 0.5, scale: 1, peak: 0.95, size: 0.4, spread: 4.6 },
+  // 돌진 발동 — 흙먼지를 걷어차는 순간. 불꽃색이 아니라 흙색이라 타격과 헷갈리지 않는다.
+  enemyRelease: { color: 0xc9b38f, life: 0.34, scale: 1, peak: 0.85, size: 0.34, spread: 5.4 },
 }
 
-const RING: Partial<Record<CombatEventKind, Spec>> = {
+/**
+ * **돌진 충돌은 평타 피격보다 세게 보여야 한다.** 같은 `playerHurt` 여도 몸으로 받은
+ * 돌진은 예고를 못 읽었다는 뜻이라, 화면이 그 차이를 말해 줘야 다음에 읽게 된다.
+ * `sourceActionId` 로 갈라 불꽃을 덧씌운다.
+ */
+export const CHARGE_IMPACT: Spec = {
+  color: 0xff8a62, life: 0.42, scale: 1, peak: 1, size: 0.52, spread: 6.8,
+}
+
+export const RING: Partial<Record<CombatEventKind, Spec>> = {
   enemyDeath: { color: 0xd8c4a0, life: 0.45, scale: 2.1, peak: 0.6 },
   // 브레이크 성공은 이 게임에서 가장 큰 순간이라 가장 크게 남긴다
   breakSuccess: { color: 0x7ed5ef, life: 0.75, scale: 5.5, peak: 0.95 },
@@ -218,6 +238,19 @@ const RING: Partial<Record<CombatEventKind, Spec>> = {
   // 회전베기 — 판정 반경(SKILLS.whirlwind.radius = 3)과 눈에 보이는 크기를 맞춘다.
   // 이펙트가 판정보다 작으면 "맞았는데 안 닿아 보인다", 크면 "닿았는데 안 맞는다" 가 된다.
   whirlwind: { color: 0xffd98a, life: 0.42, scale: 3, peak: 0.8 },
+  // 치명타의 얇은 흰 고리. 레퍼런스(MOON DEFENSE)에서 타격이 그 카메라 거리에서도
+  // 읽히는 이유가 이 고리였다 — 대비가 극단적이라 어떤 배경 위에서도 보인다.
+  // 불꽃만으로는 밝은 바닥에서 묻힌다.
+  crit: { color: 0xffffff, life: 0.3, scale: 2.7, peak: 0.95 },
+  // 파괴 지점에 퍼지는 먼지. 낮고 넓게 — 바닥에서 피어오르는 느낌.
+  propBreak: { color: 0x9c8f78, life: 0.55, scale: 2.2, peak: 0.5 },
+  // 돌진 출발 지점의 흙먼지 고리.
+  enemyRelease: { color: 0xcbb392, life: 0.36, scale: 2, peak: 0.6 },
+  /**
+   * 돌진 후 회복 — **차가운 고리는 "네 차례" 라는 뜻이다.** 텔레그래프의 취소 색과 같다.
+   * 위협(따뜻한 주황) / 충돌(흰색) / 기회(차가운 파랑) 세 색이 이 게임의 전투 색 언어다.
+   */
+  enemyRecovery: { color: 0x8fb9d6, life: 0.5, scale: 1.5, peak: 0.32 },
 }
 
 /**
@@ -229,6 +262,30 @@ const SWEEP_BLADES = [
   { angle: Math.PI * 0.7, spin: 12.5, scale: 2.45, peak: 0.6, life: 0.3 },
   { angle: Math.PI * 1.35, spin: 18, scale: 1.85, peak: 0.45, life: 0.26 },
 ]
+
+/**
+ * 시전 준비 고리 — **안으로 모인다.** 타격 고리가 밖으로 퍼지는 것과 방향이 반대라
+ * "터졌다" 가 아니라 "곧 나간다" 로 읽힌다. 예고가 타격처럼 보이면 회피 판단이 늦는다.
+ *
+ * `life` 는 각 스킬의 실제 windup 시간(S2 계약)과 맞춘다. 연출이 준비동작보다 길면
+ * 이미 나간 스킬에 예고가 남고, 짧으면 예고 없는 구간이 생긴다.
+ */
+export const WINDUP: Partial<Record<SkillId, { color: number; from: number; life: number; peak: number }>> = {
+  whirlwind: { color: 0xffd98a, from: 2.8, life: 0.14, peak: 0.8 },
+  dash: { color: 0xbfe4ff, from: 1.9, life: 0.09, peak: 0.65 },
+  guard: { color: 0x9fd8ff, from: 2.1, life: 0.12, peak: 0.7 },
+  execution: { color: 0xff9a7a, from: 3.0, life: 0.28, peak: 0.9 },
+}
+
+/**
+ * 시전 발동 고리 — windup 과 **같은 색, 반대 방향**이다.
+ * 모였다가(windup) 터진다(release). 같은 색으로 묶어야 `castId` 로 이어진 한 동작으로 읽힌다.
+ * 회전베기·돌진은 이미 전용 연출이 있으므로 여기서는 방어·처형만 받는다.
+ */
+export const RELEASE: Partial<Record<SkillId, { color: number; scale: number; life: number; peak: number }>> = {
+  guard: { color: 0x9fd8ff, scale: 2.3, life: 0.34, peak: 0.75 },
+  execution: { color: 0xff9a7a, scale: 3.4, life: 0.4, peak: 0.95 },
+}
 
 export function spawnCombatVfx(res: Resources, evt: CombatEvent): void {
   ensurePools(res)
@@ -256,6 +313,31 @@ export function spawnCombatVfx(res: Resources, evt: CombatEvent): void {
     s.obj.visible = true
   }
 
+  if (evt.kind === "skillRelease" && evt.skillId) {
+    const rl = RELEASE[evt.skillId]
+    if (rl) {
+      const s = take("ring", now)
+      s.active = true; s.start = now; s.life = rl.life
+      s.from = 0.4; s.to = rl.scale; s.peak = rl.peak * evt.power
+      s.mat.color.setHex(rl.color)
+      s.obj.position.set(evt.at.x, 0.09, evt.at.z)
+      s.obj.visible = true
+    }
+  }
+
+  if (evt.kind === "skillWindup" && evt.skillId) {
+    const wu = WINDUP[evt.skillId]
+    if (wu) {
+      const s = take("ring", now)
+      s.active = true; s.start = now; s.life = wu.life
+      // from > to 라서 고리가 안으로 조여든다.
+      s.from = wu.from; s.to = 0.35; s.peak = wu.peak * evt.power
+      s.mat.color.setHex(wu.color)
+      s.obj.position.set(evt.at.x, 0.08, evt.at.z)
+      s.obj.visible = true
+    }
+  }
+
   if (evt.kind === "whirlwind") {
     for (const b of SWEEP_BLADES) {
       const s = take("sweep", now)
@@ -271,7 +353,10 @@ export function spawnCombatVfx(res: Resources, evt: CombatEvent): void {
     }
   }
 
-  const spark = SPARK[evt.kind]
+  // 돌진 충돌은 같은 playerHurt 라도 더 크게 튄다.
+  const spark = evt.kind === "playerHurt" && evt.sourceActionId === "charge"
+    ? CHARGE_IMPACT
+    : SPARK[evt.kind]
   if (spark) {
     const s = take("spark", now)
     s.active = true; s.start = now; s.life = spark.life

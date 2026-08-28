@@ -97,6 +97,24 @@ export function movementSystem(world: GameWorld, res: Resources, dt: number): vo
       continue
     }
 
+    // 돌진은 길찾기 이동과 분리된 직선 이동이다. 방향은 windup 시점에
+    // 잠겼고, 벽에서 멈추므로 이동량과 실제 접촉 경로를 같은 값으로 추적할 수 있다.
+    if (e.enemyAction?.actionId === "charge" && e.enemyAction.phase === "active" && e.enemy) {
+      const charge = ENEMY_DEFS[e.enemy.kind].charge
+      if (charge) {
+        const next = moveWithWalls(
+          res.map,
+          p,
+          { x: e.enemyAction.dir.x * charge.speed * dt, z: e.enemyAction.dir.z * charge.speed * dt },
+          radius,
+        )
+        p.x = next.x
+        p.z = next.z
+        e.transform.yaw = Math.atan2(e.enemyAction.dir.x, e.enemyAction.dir.z)
+        continue
+      }
+    }
+
     if (!e.moveTarget) {
       if (e.path) world.removeComponent(e, "path")
       continue
@@ -160,6 +178,25 @@ export function movementSystem(world: GameWorld, res: Resources, dt: number): vo
     for (let j = i + 1; j < units.length; j++) {
       const a = units[i]!
       const b = units[j]!
+      // 소품은 정적인 환경물이다. 소품을 적·소품 쪽으로 밀어 버리면 벽가의
+      // 장식이 전투 무리 안으로 떠밀려 들어가고, 적의 길찾기 기준선도 바뀐다.
+      // 첫 버전에서는 플레이어/동료만 소품에 막히게 하고, 소품 자체와 적은
+      // 움직이지 않는다.
+      if (a.destructible || b.destructible) {
+        if (a.destructible && b.destructible) continue
+        const prop = a.destructible ? a : b
+        const unit = a.destructible ? b : a
+        if (!unit.player && !unit.companion) continue
+        const pp = prop.transform!.position
+        const up = unit.transform!.position
+        const off = separate(up, unit.radius!, pp, prop.radius)
+        if (off.x !== 0 || off.z !== 0) {
+          const next = moveWithWalls(res.map, up, { x: off.x, z: off.z }, unit.radius!)
+          up.x = next.x
+          up.z = next.z
+        }
+        continue
+      }
       const pa = a.transform!.position
       const pb = b.transform!.position
       const off = separate(pa, a.radius!, pb, b.radius!)

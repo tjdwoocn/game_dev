@@ -6,8 +6,11 @@ import { applyKnockback } from "./movement"
 import { shakeCamera } from "./render"
 import { beginBreakWindow } from "./break"
 import { selectPartyTarget } from "./party"
-import { MINE_BOSS_PATTERNS, selectPattern, type PatternDef } from "../content/patterns"
 import { spawnEnemy } from "../content/enemies"
+import { nextBossPhase, patternOf } from "./bossLogic"
+
+// 기존 테스트·호출부 호환용. 실제 순수 로직은 bossLogic.ts가 소유한다.
+export { nextBossPhase } from "./bossLogic"
 
 export const BOSS = {
   slam: { telegraph: 1.4, radius: 3.5, damage: 25, count: 3, interval: 1.8 },
@@ -21,76 +24,11 @@ export const BOSS = {
 } as const
 
 
-/**
- * 패턴 id → 예고 페이즈 이름. 패턴을 추가할 때 여기만 늘리면 된다.
- *
- * 예전에는 `rngPick < 0.5 ? "slamTelegraph" : "chargeTelegraph"` 로 두 개를 반반 골랐다.
- * 그래서 **패턴 계약(`content/patterns.ts`)이 우선순위·가중치·조건까지 갖춰 놓고도
- * 전혀 쓰이지 않았다.** 이제 `selectPattern` 이 고르고 여기서 페이즈로 옮긴다.
- */
-const TELEGRAPH_PHASE: Record<string, BossPhase> = {
-  slam: "slamTelegraph",
-  charge: "chargeTelegraph",
-  sweep: "sweepTelegraph",
-  summon: "summonTelegraph",
-  quake: "quakeTelegraph",
-}
-
-const PATTERN_BY_ID = new Map(MINE_BOSS_PATTERNS.map((p) => [p.id, p]))
-
-function patternOf(id: string | undefined): PatternDef | undefined {
-  return id ? PATTERN_BY_ID.get(id) : undefined
-}
-
 /** 살아 있는 하수인 수. 소환 패턴의 조건이 이 값을 본다. */
 function liveMinions(boss: BossComp): number {
   if (!boss.minions) return 0
   boss.minions = boss.minions.filter((m) => !m.dead)
   return boss.minions.length
-}
-
-/** 페이즈 전이 결정(순수). null이면 유지. 부수효과는 bossSystem이 담당. */
-export function nextBossPhase(
-  boss: BossComp,
-  now: number,
-  rngPick: number,
-  ctx: { healthFraction: number; summonCount: number } = { healthFraction: 1, summonCount: 0 },
-): BossPhase | null {
-  switch (boss.phase) {
-    case "idle": {
-      if (!boss.engaged || now < boss.nextPatternAt) return null
-      const picked = selectPattern(MINE_BOSS_PATTERNS, {
-        healthFraction: ctx.healthFraction,
-        summonCount: ctx.summonCount,
-        previousPatternId: boss.lastPatternId,
-      }, rngPick)
-      if (!picked) return null
-      boss.lastPatternId = picked.id
-      return TELEGRAPH_PHASE[picked.id] ?? "slamTelegraph"
-    }
-    case "slamTelegraph":
-      return now >= boss.phaseUntil ? "slamming" : null
-    case "slamming":
-      if (now < boss.phaseUntil) return null
-      // 내려찍기만 연타한다. 다른 패턴은 한 번으로 끝난다.
-      return boss.slamCount < (patternOf("slam")?.repeatCount ?? 3) ? "slamTelegraph" : "idle"
-    case "chargeTelegraph":
-      return now >= boss.phaseUntil ? "charging" : null
-    case "charging":
-      return now >= boss.phaseUntil ? "idle" : null
-    case "sweepTelegraph":
-      return now >= boss.phaseUntil ? "sweeping" : null
-    case "sweeping":
-      return now >= boss.phaseUntil ? "idle" : null
-    case "summonTelegraph":
-      return now >= boss.phaseUntil ? "summoning" : null
-    case "summoning":
-      return now >= boss.phaseUntil ? "idle" : null
-    case "quakeTelegraph":
-      return now >= boss.phaseUntil ? "quaking" : null
-    case "quaking":
-      return now >= boss.phaseUntil ? "idle" : null
-  }
 }
 
 // 텔레그래프 시각 표시 (모듈 상태 — 보스는 1기)
@@ -101,19 +39,25 @@ let quakeMesh: THREE.Mesh | null = null
 let safeMesh: THREE.Mesh | null = null
 let slamTarget: Vec2 = { x: 0, z: 0 }
 
-function showSlamTelegraph(res: Resources, at: Vec2) {
+function showSlamTelegraph(res: Resources, at: Vec2, radius: number = BOSS.slam.radius) {
   clearTelegraphs(res)
-  slamMesh = new THREE.Mesh(new THREE.CircleGeometry(BOSS.slam.radius, 32), telegraphMat(0.46))
+  slamMesh = new THREE.Mesh(new THREE.CircleGeometry(radius, 32), telegraphMat(0.46))
   layFlat(slamMesh, at)
   res.scene.add(slamMesh)
 }
 
-function showChargeTelegraph(res: Resources, origin: Vec2, dir: Vec2) {
+function showChargeTelegraph(
+  res: Resources,
+  origin: Vec2,
+  dir: Vec2,
+  halfWidth: number = BOSS.charge.halfWidth,
+  maxDist: number = BOSS.charge.maxDist,
+) {
   clearTelegraphs(res)
-  chargeMesh = new THREE.Mesh(new THREE.PlaneGeometry(BOSS.charge.halfWidth * 2, BOSS.charge.maxDist), telegraphMat(0.42))
+  chargeMesh = new THREE.Mesh(new THREE.PlaneGeometry(halfWidth * 2, maxDist), telegraphMat(0.42))
   layFlat(chargeMesh, {
-    x: origin.x + (dir.x * BOSS.charge.maxDist) / 2,
-    z: origin.z + (dir.z * BOSS.charge.maxDist) / 2,
+    x: origin.x + (dir.x * maxDist) / 2,
+    z: origin.z + (dir.z * maxDist) / 2,
   })
   chargeMesh.rotation.z = -Math.atan2(dir.x, dir.z)
   res.scene.add(chargeMesh)
@@ -192,6 +136,8 @@ export function bossSystem(world: GameWorld, res: Resources, dt: number): void {
   const now = res.time.now
   const bossEntity = world.with("boss", "enemy", "transform", "health").entities[0]
   if (!bossEntity || bossEntity.dead) {
+    // 사망·존 정리 중에도 남아 있는 보스 텔레그래프를 즉시 제거한다.
+    clearTelegraphs(res)
     res.hud.setBossBreak(null, false, false)
     return
   }
@@ -218,6 +164,7 @@ export function bossSystem(world: GameWorld, res: Resources, dt: number): void {
   // 브레이크 성공 후에는 현재 패턴을 취소하고 무력화 시간 동안 행동하지 않는다.
   if (bossEntity.breakable?.brokenUntil && bossEntity.breakable.brokenUntil > now) {
     b.phase = "idle"
+    b.activePatternId = undefined
     b.slamCount = 0
     b.nextPatternAt = Math.max(b.nextPatternAt, bossEntity.breakable.brokenUntil + 1.5)
     clearTelegraphs(res)
@@ -246,43 +193,53 @@ export function bossSystem(world: GameWorld, res: Resources, dt: number): void {
     b.phase = next
     switch (next) {
       case "slamTelegraph": {
+        const p = patternOf("slam")!
+        b.activePatternId = p.id
         if (pp) slamTarget = { x: pp.x, z: pp.z }
-        b.phaseUntil = now + BOSS.slam.telegraph
-        if (bossEntity.breakable) beginBreakWindow(bossEntity.breakable, now, BOSS.slam.telegraph)
-        showSlamTelegraph(res, slamTarget)
+        b.phaseUntil = now + p.telegraph
+        if (bossEntity.breakable && p.opensBreakWindow) beginBreakWindow(bossEntity.breakable, now, p.telegraph)
+        showSlamTelegraph(res, slamTarget, p.radius ?? BOSS.slam.radius)
         break
       }
       case "slamming": {
+        const p = patternOf("slam")!
         clearTelegraphs(res)
         b.slamCount += 1
-        b.phaseUntil = now + (BOSS.slam.interval - BOSS.slam.telegraph)
+        b.phaseUntil = now + Math.max(0, (p.repeatInterval ?? BOSS.slam.interval) - p.telegraph)
         shakeCamera(res)
         if (target && playerAlive && pp) {
           const d = Math.hypot(pp.x - slamTarget.x, pp.z - slamTarget.z)
-          if (d <= BOSS.slam.radius + (target.radius ?? 0.45)) {
-            dealDamage(world, res, bossEntity, target, BOSS.slam.damage)
+          if (d <= (p.radius ?? BOSS.slam.radius) + (target.radius ?? 0.45)) {
+            dealDamage(world, res, bossEntity, target, p.damage)
           }
         }
         break
       }
       case "chargeTelegraph": {
+        const p = patternOf("charge")!
         if (pp) {
           const len = distToPlayer || 1
           b.chargeDir = { x: (pp.x - bp.x) / len, z: (pp.z - bp.z) / len }
         }
-        b.phaseUntil = now + BOSS.charge.telegraph
-        if (bossEntity.breakable) beginBreakWindow(bossEntity.breakable, now, BOSS.charge.telegraph)
+        b.activePatternId = p.id
+        b.phaseUntil = now + p.telegraph
+        if (bossEntity.breakable && p.opensBreakWindow) beginBreakWindow(bossEntity.breakable, now, p.telegraph)
         if (bossEntity.moveTarget) world.removeComponent(bossEntity, "moveTarget")
-        showChargeTelegraph(res, bp, b.chargeDir)
+        const maxDist = p.range ?? BOSS.charge.maxDist
+        showChargeTelegraph(res, bp, b.chargeDir, (p.width ?? BOSS.charge.halfWidth * 2) / 2, maxDist)
         break
       }
       case "charging": {
+        const p = patternOf("charge")!
         clearTelegraphs(res)
-        const duration = BOSS.charge.maxDist / BOSS.charge.speed
+        const speed = Number(p.parameters?.speed ?? BOSS.charge.speed)
+        const maxDist = p.range ?? BOSS.charge.maxDist
+        const halfWidth = (p.width ?? BOSS.charge.halfWidth * 2) / 2
+        const duration = p.active > 0 ? p.active : maxDist / speed
         b.phaseUntil = now + duration
-        applyKnockback(world, bossEntity, b.chargeDir, BOSS.charge.speed, now + duration)
-        if (target && playerAlive && pp && pointInPath(bp, b.chargeDir, BOSS.charge.halfWidth, BOSS.charge.maxDist, pp, target.radius ?? 0.45)) {
-          dealDamage(world, res, bossEntity, target, BOSS.charge.damage)
+        applyKnockback(world, bossEntity, b.chargeDir, speed, now + duration)
+        if (target && playerAlive && pp && pointInPath(bp, b.chargeDir, halfWidth, maxDist, pp, target.radius ?? 0.45)) {
+          dealDamage(world, res, bossEntity, target, p.damage)
           const side = { x: b.chargeDir.z, z: -b.chargeDir.x }
           applyKnockback(world, target, side, 10, now + 0.2)
         }
@@ -363,6 +320,10 @@ export function bossSystem(world: GameWorld, res: Resources, dt: number): void {
       }
       case "idle": {
         b.slamCount = 0
+        // 현재는 보스 전체의 리듬을 보존한다. PatternDef.cooldown은 패턴별 밸런스
+        // 조정용 데이터로 남겨 두고, 실제 공통 간격에 적용하는 것은 별도 패키지에서
+        // 보스 시나리오의 생존·패턴 노출 기준과 함께 조정한다.
+        b.activePatternId = undefined
         b.nextPatternAt = now + BOSS.patternCooldown
         break
       }

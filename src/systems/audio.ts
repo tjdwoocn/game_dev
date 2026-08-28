@@ -128,7 +128,7 @@ function noiseBurst(o: NoiseOpts): void {
  * 소리 사전. 값은 전부 귀로 맞춘 것이라 주석에 의도를 적어 둔다 —
  * 나중에 조정할 때 "왜 이 값인가" 를 모르면 다시 처음부터 더듬어야 한다.
  */
-const SOUNDS: Record<string, (power: number) => void> = {
+export const SOUNDS: Record<string, (power: number) => void> = {
   /** 헛휘두르기. 짧은 바람소리. 맞았을 때의 타격음과 겹쳐도 지저분하지 않게 얇게 둔다. */
   swing: () => {
     noiseBurst({ freq: 1100, freqEnd: 380, q: 0.8, gain: 0.12, attack: 0.01, decay: 0.1 })
@@ -192,10 +192,64 @@ const SOUNDS: Record<string, (power: number) => void> = {
     noiseBurst({ freq: 380, freqEnd: 1900, q: 1.3, gain: 0.16, attack: 0.012, decay: 0.22, delay: 0.09 })
     tone({ freq: 132, freqEnd: 88, type: "sawtooth", gain: 0.16, attack: 0.01, decay: 0.28 })
   },
+  /**
+   * 치명타. 일반 타격의 몸통 위에 **위쪽 금속성 링** 을 얹는다.
+   * 타격음을 통째로 갈아치우지 않는 이유 — 같은 "맞았다" 계열로 들려야 하고,
+   * 그 위에 얹힌 한 겹으로 "더 세게" 가 구분돼야 한다. 아예 다른 소리면 별개 사건으로 들린다.
+   */
+  crit: (p) => {
+    tone({ freq: 168, freqEnd: 66, type: "sine", gain: 0.4 * p, attack: 0.002, decay: 0.16 })
+    noiseBurst({ freq: 3100, q: 1.6, gain: 0.22 * p, attack: 0.001, decay: 0.06 })
+    tone({ freq: 1320, freqEnd: 1980, type: "triangle", gain: 0.17 * p, attack: 0.002, decay: 0.22 })
+  },
+  /**
+   * 시전 준비. 아주 짧게 위로 차오르는 숨 — 소리로도 "곧 나간다" 를 알린다.
+   * 예고음이 타격음만큼 크면 정작 타격이 안 들리므로 얇게 깐다.
+   */
+  skillWindup: () => {
+    tone({ freq: 300, freqEnd: 640, type: "triangle", gain: 0.1, attack: 0.012, decay: 0.11 })
+  },
+  /** 소품 파괴. 마른 나무가 쪼개지는 소리 — 금속성 타격음과 구분돼야 한다. */
+  propBreak: (p) => {
+    noiseBurst({ freq: 900, freqEnd: 240, q: 0.5, gain: 0.26 * p, attack: 0.002, decay: 0.22 })
+    tone({ freq: 190, freqEnd: 84, type: "triangle", gain: 0.18 * p, attack: 0.003, decay: 0.18 })
+  },
+  /** 스킬 발동(방어·처형 공용). 짧고 단단한 발동음. */
+  skillRelease: (p) => {
+    tone({ freq: 420, freqEnd: 240, type: "triangle", gain: 0.2 * p, attack: 0.004, decay: 0.18 })
+    noiseBurst({ freq: 1400, q: 1, gain: 0.14 * p, attack: 0.003, decay: 0.1 })
+  },
   /** 보스 패턴 예고. 낮게 울리는 경고음 — 피하라는 뜻이다. */
   bossTelegraph: () => {
     tone({ freq: 74, freqEnd: 58, type: "sawtooth", gain: 0.3, attack: 0.03, decay: 0.5 })
     tone({ freq: 148, freqEnd: 116, type: "sine", gain: 0.14, attack: 0.03, decay: 0.45 })
+  },
+  /**
+   * 잡몹 돌진 예고. **보스 예고와 반대로 올라간다.**
+   * 보스 경고는 내려가는 저음(74→58)이라 "무겁게 다가온다" 로 읽히고,
+   * 이건 올라가는 마찰음이라 "차오른다 — 곧 튀어나온다" 로 읽힌다.
+   * 같은 소리를 쓰면 잡몹 하나가 자세만 잡아도 보스급 위협으로 들린다.
+   */
+  enemyWindup: (p) => {
+    tone({ freq: 96, freqEnd: 190, type: "sawtooth", gain: 0.16 * p, attack: 0.04, decay: 0.34 })
+    noiseBurst({ freq: 320, freqEnd: 780, q: 1.4, gain: 0.1 * p, attack: 0.05, decay: 0.3 })
+  },
+  /** 돌진 발동. 공기를 가르는 소리 — 위에서 아래로 훑는다. */
+  enemyRelease: (p) => {
+    noiseBurst({ freq: 1500, freqEnd: 240, q: 0.8, gain: 0.24 * p, attack: 0.006, decay: 0.24 })
+    tone({ freq: 240, freqEnd: 96, type: "triangle", gain: 0.14 * p, attack: 0.004, decay: 0.2 })
+  },
+  /** 돌진 후 회복. 아주 작은 숨 — "지금 때려도 된다" 를 조용히 알린다. */
+  enemyRecovery: (p) => {
+    noiseBurst({ freq: 210, freqEnd: 120, q: 0.7, gain: 0.07 * p, attack: 0.03, decay: 0.26 })
+  },
+  /**
+   * 돌진 충돌. 일반 피격(`playerHurt`)은 베이는 소리지만 이건 몸으로 받는 소리다.
+   * 저음 덩어리 + 짧은 파열음으로 무게를 만든다.
+   */
+  chargeImpact: (p) => {
+    tone({ freq: 132, freqEnd: 46, type: "sine", gain: 0.34 * p, attack: 0.002, decay: 0.3 })
+    noiseBurst({ freq: 620, freqEnd: 150, q: 0.6, gain: 0.26 * p, attack: 0.002, decay: 0.18 })
   },
 }
 
@@ -203,6 +257,9 @@ const SOUNDS: Record<string, (power: number) => void> = {
 const THROTTLE: Record<string, number> = {
   hit: 0.035, hitHeavy: 0.04, swing: 0.06, enemyDeath: 0.05,
   playerHurt: 0.15, lootDrop: 0.04, lootPickup: 0.05, whirlwind: 0.12,
+  crit: 0.04, skillWindup: 0.05, propBreak: 0.05, skillRelease: 0.05,
+  // 여러 마리가 동시에 자세를 잡으면 예고음이 뭉쳐 하나로 들린다. 조금 넓게 잡는다.
+  enemyWindup: 0.09, enemyRelease: 0.06, enemyRecovery: 0.12, chargeImpact: 0.12,
 }
 
 export function playSound(name: keyof typeof SOUNDS | string, power = 1): void {
