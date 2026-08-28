@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- 등불. 세계관의 중심 소품이라 탭 아이콘도 이것으로 둔다. -->
+  <rect width="32" height="32" rx="6" fill="#a8c8d8"/>
+  <path d="M13 5h6v2h-6z" fill="#3f3129"/>
+  <path d="M16 7v3" stroke="#3f3129" stroke-width="2"/>
+  <path d="M10 12h12l2 12a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2z" fill="#ffd8a0" stroke="#3f3129" stroke-width="1.6" stroke-linejoin="round"/>
+  <ellipse cx="16" cy="19" rx="3.2" ry="4.2" fill="#ffb02e"/>
+</svg>

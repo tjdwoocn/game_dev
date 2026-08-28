@@ -1,0 +1,432 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+/**
+ * UI 색 토큰 — 월드 팔레트(src/content/theme.ts 의 BRIGHT_THEME)와 짝을 맞춘다.
+ *
+ * 월드만 밝아지고 HUD 는 다크로 남아, 화면이 서로 다른 두 게임처럼 보였다.
+ * 색은 여기서만 정한다. 규칙은 셋이다.
+ *   - **패널은 밝고 글자는 짙다.** 반대로 하면 밝은 월드 위에 검은 창이 구멍처럼 뚫린다.
+ *   - **선택·강조는 금색.** 세계관의 등불과 같은 축이라 의미가 붙는다.
+ *   - **체력·분노·브레이크는 색상(hue)을 유지하고 명도만 올린다.** 플레이어가 이미 익힌
+ *     신호를 바꾸면 안 되지만, 어두운 값 그대로면 밝은 패널 위에서 읽히지 않는다.
+ *
+ * 새 패널을 붙일 때는 이 토큰만 참조한다. 색을 직접 쓰면 팔레트가 다시 흩어진다.
+ */
+:root {
+  --ink: #3f3129;        /* 월드 외곽선과 같은 짙은 갈색. 기본 글자색 */
+  --ink-soft: #6d5b4b;
+  --ink-faint: #94806c;
+  --panel: #fdf5e6;      /* 밝은 크림. 반구광 하늘빛(0xfff4e0) 계열 */
+  --panel-sunk: #ece0c9; /* 눌린 면·빈 칸 */
+  --panel-edge: #c2ab8a;
+  --panel-shadow: rgba(63, 49, 41, 0.3);
+  --gold: #cf9a2f;
+  --gold-soft: #f4dea6;
+  --sky: #a8c8d8;        /* 월드 배경색 */
+
+  --hp: #d8402f;   --hp-deep: #8e1c16;
+  --rage: #f0952a; --rage-deep: #a4560a;
+  --xp: #e8c352;   --xp-deep: #9d7d26;
+  --ally: #3f9e5c;
+
+  --break-open: #d99a1f;
+  --break-done: #2f9dc6;
+  --danger: #b03026;
+
+  /* 월드 위에 직접 뜨는 글자(데미지 숫자 등)의 그림자. 밝은 바닥에서도 읽혀야 한다. */
+  --world-text-shadow: 0 1px 3px rgba(40, 28, 20, 0.85);
+}
+
+html, body {
+  width: 100%; height: 100%; overflow: hidden;
+  background: var(--sky);
+  font-family: "Segoe UI", "Malgun Gothic", sans-serif;
+  user-select: none;
+}
+
+#game { position: fixed; inset: 0; }
+#game canvas { display: block; }
+
+#vignette {
+  position: fixed; inset: 0; pointer-events: none; z-index: 5;
+  /* 밝은 톤에서는 강한 비네트가 다시 "어두침침한" 인상을 만든다. 형태만 남기고 약하게 둔다. */
+  background: radial-gradient(ellipse at center, transparent 68%, rgba(40, 30, 20, 0.18) 100%);
+}
+
+#hud { position: fixed; inset: 0; pointer-events: none; z-index: 10; color: var(--ink); }
+.hidden { display: none !important; }
+
+/* ---- bottom bar ---- */
+#bottom-bar {
+  position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%);
+  display: flex; align-items: flex-end; gap: 18px;
+}
+
+.orb {
+  position: relative; width: 92px; height: 92px; border-radius: 50%;
+  border: 3px solid var(--panel-edge); overflow: hidden;
+  background: var(--panel-sunk);
+  box-shadow: 0 2px 10px var(--panel-shadow), inset 0 0 10px rgba(63, 49, 41, 0.25);
+}
+.orb-fill {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 100%;
+  transition: height 0.15s ease-out;
+}
+#hp-fill { background: linear-gradient(to top, var(--hp-deep), var(--hp)); }
+#rage-fill { background: linear-gradient(to top, var(--rage-deep), var(--rage)); }
+/*
+ * 오브 숫자는 두 배경 위에 동시에 놓인다 — 채워진 부분(진한 빨강·주황)과 비어 있는 부분
+ * (크림색 우물). 부드러운 그림자만 주면 분노가 0일 때 흰 글자가 크림 바탕에 묻혀 사라진다.
+ * 실제로 그렇게 나왔다. 사방 외곽선을 둘러 어떤 배경에서도 읽히게 한다.
+ */
+.orb-text {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  font-size: 14px; font-weight: 800; color: #fff8ec;
+  text-shadow:
+    1px 1px 0 rgba(63, 49, 41, 0.85), -1px 1px 0 rgba(63, 49, 41, 0.85),
+    1px -1px 0 rgba(63, 49, 41, 0.85), -1px -1px 0 rgba(63, 49, 41, 0.85),
+    0 2px 4px rgba(40, 28, 20, 0.5);
+}
+
+#center-column { display: flex; flex-direction: column; gap: 6px; align-items: center; }
+
+#skillbar { display: flex; gap: 6px; }
+.skill-slot {
+  position: relative; width: 74px; height: 58px; overflow: hidden;
+  border: 2px solid var(--panel-edge); border-radius: 6px;
+  background: var(--panel);
+  box-shadow: 0 2px 8px var(--panel-shadow);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+}
+.skill-slot.insufficient { opacity: 0.45; }
+.skill-key { font-size: 10px; color: var(--ink-faint); }
+.skill-name { font-size: 12px; font-weight: 700; color: var(--ink); }
+.cooldown-overlay {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 0%;
+  background: rgba(63, 49, 41, 0.55); pointer-events: none;
+}
+
+#xp-bar {
+  position: relative; width: 240px; height: 10px; border-radius: 5px; overflow: hidden;
+  border: 1px solid var(--panel-edge); background: var(--panel-sunk);
+}
+#xp-fill { height: 100%; width: 0%; background: linear-gradient(to right, var(--xp-deep), var(--xp)); transition: width 0.2s; }
+#level-text {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  font-size: 9px; font-weight: 700; color: var(--ink);
+}
+
+/* ---- boss bar ---- */
+#boss-bar {
+  position: absolute; top: 18px; left: 50%; transform: translateX(-50%);
+  width: 420px; text-align: center;
+}
+#boss-bar-name { font-size: 15px; font-weight: 700; color: var(--ink); text-shadow: 0 1px 2px rgba(253, 245, 230, 0.9); }
+#boss-bar-track {
+  margin-top: 4px; height: 14px; border: 2px solid var(--panel-edge); border-radius: 4px;
+  background: var(--panel-sunk); overflow: hidden;
+}
+#boss-bar-fill { height: 100%; width: 100%; background: linear-gradient(to right, var(--hp-deep), var(--hp)); transition: width 0.15s; }
+#boss-break-status { min-height: 16px; font-size: 11px; font-weight: 600; color: var(--gold); text-shadow: 0 1px 2px rgba(253, 245, 230, 0.9); }
+#boss-bar.break-open #boss-bar-track { border-color: var(--break-open); box-shadow: 0 0 12px rgba(217, 154, 31, 0.65); }
+#boss-bar.broken #boss-bar-track { border-color: var(--break-done); box-shadow: 0 0 16px rgba(47, 157, 198, 0.75); }
+
+#party-panel {
+  position: absolute; top: 18px; left: 18px; width: 170px;
+  display: flex; flex-direction: column; gap: 5px; pointer-events: none;
+}
+.party-member {
+  padding: 5px 7px; border: 1px solid var(--panel-edge); border-radius: 5px;
+  background: var(--panel); font-size: 11px; box-shadow: 0 1px 5px var(--panel-shadow);
+}
+.party-role { color: var(--gold); font-weight: 700; margin-right: 5px; }
+.party-name { color: var(--ink); }
+.party-hp { height: 3px; margin-top: 4px; background: var(--panel-sunk); border-radius: 2px; overflow: hidden; }
+.party-hp i { display: block; height: 100%; background: var(--ally); transition: width 0.15s; }
+
+/* ---- inventory ---- */
+#inventory {
+  position: absolute; right: 20px; top: 50%; transform: translateY(-50%);
+  width: 300px; padding: 14px; pointer-events: auto;
+  border: 2px solid var(--panel-edge); border-radius: 8px;
+  background: var(--panel);
+  box-shadow: 0 6px 24px var(--panel-shadow);
+}
+#inventory h3 { font-size: 15px; margin-bottom: 10px; color: var(--ink); }
+#inventory .hint { font-size: 11px; color: var(--ink-faint); font-weight: 400; }
+
+#equipment-row { display: flex; gap: 6px; margin-bottom: 12px; }
+.equip-slot {
+  flex: 1; height: 58px; border: 1px dashed var(--panel-edge); border-radius: 5px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  font-size: 10px; color: var(--ink-faint); cursor: default;
+}
+.equip-slot.filled { border-style: solid; cursor: pointer; background: var(--panel-sunk); }
+
+#inventory-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 5px; }
+.inv-cell {
+  aspect-ratio: 1; border: 1px solid var(--panel-edge); border-radius: 4px;
+  background: var(--panel-sunk);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 17px; cursor: pointer;
+}
+.inv-cell:hover { background: var(--gold-soft); border-color: var(--gold); }
+
+/*
+ * 등급 색은 **밝은 패널 위에서** 읽혀야 한다. 다크 UI 시절의 밝은 값(#d8d2c4 등)을
+ * 그대로 두면 크림색 배경에 묻혀 글자가 사라진다. 색상(hue)은 유지하고 명도만 낮췄다.
+ */
+.rarity-common { color: var(--ink-soft); border-color: var(--panel-edge) !important; }
+.rarity-magic { color: #2f5fc0; border-color: #2f5fc0 !important; }
+.rarity-rare { color: #a5760c; border-color: #a5760c !important; }
+
+#item-tooltip {
+  position: absolute; right: 105%; top: 0; width: 200px; padding: 10px;
+  border: 1px solid var(--panel-edge); border-radius: 5px;
+  background: var(--panel); color: var(--ink); font-size: 12px; line-height: 1.5;
+  box-shadow: 0 4px 16px var(--panel-shadow);
+  pointer-events: none; white-space: pre-line;
+}
+
+/* ---- floating damage / nameplates ---- */
+#floating-layer, #nameplates { position: absolute; inset: 0; overflow: hidden; }
+
+/* 월드 위에 직접 뜨므로 패널 규칙(밝은 바탕·짙은 글자)이 아니라 그림자로 대비를 만든다. */
+.float-dmg {
+  position: absolute; transform: translate(-50%, -50%);
+  font-size: 17px; font-weight: 800; color: #fff6e2; text-shadow: var(--world-text-shadow);
+  animation: float-up 0.7s ease-out forwards; pointer-events: none;
+}
+.float-dmg.player-hit { color: #ff8a7a; }
+.float-dmg.focus-hit { color: #ffe07a; font-size: 19px; }
+.float-dmg.break-hit { color: #9fe8ff; font-size: 20px; letter-spacing: 1px; }
+.float-dmg.heal { color: #a8e8b8; font-size: 15px; }
+@keyframes float-up {
+  0% { opacity: 1; margin-top: 0; }
+  100% { opacity: 0; margin-top: -46px; }
+}
+
+.enemy-hpbar {
+  position: absolute; transform: translate(-50%, -50%);
+  width: 44px; height: 5px; border: 1px solid var(--ink); border-radius: 3px;
+  background: rgba(253, 245, 230, 0.85); pointer-events: none; overflow: hidden;
+}
+.enemy-hpbar > div { height: 100%; background: var(--hp); }
+
+.loot-label {
+  position: absolute; transform: translate(-50%, -100%);
+  font-size: 12px; font-weight: 700; padding: 1px 7px;
+  background: var(--panel); border: 1px solid currentColor; border-radius: 4px;
+  box-shadow: 0 2px 6px var(--panel-shadow);
+  cursor: pointer; pointer-events: auto;
+}
+
+/* ---- NPC interaction / zone selection ---- */
+#interaction-hint {
+  position: absolute; left: 50%; bottom: 126px; transform: translateX(-50%);
+  padding: 7px 13px; border: 2px solid var(--gold); border-radius: 6px;
+  background: var(--panel); color: var(--ink); font-size: 13px; font-weight: 600;
+  box-shadow: 0 3px 12px var(--panel-shadow); pointer-events: none;
+}
+#zone-menu {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  background: rgba(63, 49, 41, 0.38); pointer-events: auto;
+}
+.zone-menu-panel {
+  width: min(360px, calc(100vw - 32px)); padding: 18px;
+  border: 2px solid var(--panel-edge); border-radius: 9px;
+  background: var(--panel); box-shadow: 0 10px 34px var(--panel-shadow);
+}
+.zone-menu-panel h3 { margin-bottom: 12px; color: var(--ink); font-size: 17px; text-align: center; }
+.zone-choice, .zone-menu-close {
+  width: 100%; margin-top: 6px; padding: 9px 11px; border-radius: 5px;
+  border: 1px solid var(--panel-edge); background: var(--panel-sunk);
+  color: var(--ink); cursor: pointer; font: inherit; text-align: left;
+}
+.zone-choice { display: flex; align-items: center; justify-content: space-between; }
+.zone-choice:hover, .zone-menu-close:hover { background: var(--gold-soft); border-color: var(--gold); }
+.zone-choice-boss { border-color: var(--danger); color: #8f2a22; }
+.zone-choice small { color: var(--ink-faint); font-size: 11px; }
+.zone-menu-close { margin-top: 14px; color: var(--ink-faint); text-align: center; }
+
+/* ---- overlay ---- */
+#overlay {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  flex-direction: column; gap: 12px;
+  background: rgba(63, 49, 41, 0.45);
+  font-size: 44px; font-weight: 800; letter-spacing: 2px;
+  color: #ff7a68; text-shadow: var(--world-text-shadow);
+}
+#overlay.clear { color: #ffd85c; }
+#overlay .sub { font-size: 16px; font-weight: 400; color: #f2e6d2; letter-spacing: 0; }
+
+/* ---- level up flash ---- */
+#hud.levelup-flash::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: radial-gradient(ellipse at center, rgba(232, 195, 82, 0.3), transparent 70%);
+  animation: lvflash 0.8s ease-out forwards;
+}
+@keyframes lvflash { 0% { opacity: 1; } 100% { opacity: 0; } }
+
+/* ── 미니맵 · 전체 지도 ─────────────────────────────────────────
+   갱도가 45행으로 길어지면서 "지금 어디쯤인지" 가 화면만 봐서는 안 읽힌다.
+   미니맵은 항상 우하단에, 전체 지도는 M 으로 화면 가운데에 띄운다.
+   색은 캔버스가 직접 칠하므로 여기서는 틀과 배치만 잡는다. */
+#minimap {
+  position: fixed;
+  right: 18px;
+  top: 18px;
+  width: 190px;
+  height: 190px;
+  border-radius: 10px;
+  border: 2px solid var(--panel-edge);
+  background: var(--panel-sunk);
+  box-shadow: var(--panel-shadow);
+  pointer-events: none;
+  image-rendering: pixelated;
+  opacity: 0.95;
+}
+
+#fullmap {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  /* 지도를 볼 때는 게임이 계속 돌아가므로, 뒤가 완전히 가려지면 위험을 못 본다 */
+  background: rgba(24, 20, 16, 0.72);
+  z-index: 40;
+  pointer-events: none;
+}
+
+#fullmap.hidden { display: none; }
+
+#fullmap canvas {
+  border-radius: 12px;
+  border: 2px solid var(--panel-edge);
+  background: var(--panel-sunk);
+  box-shadow: var(--panel-shadow);
+  image-rendering: pixelated;
+}
+
+.fullmap-title {
+  font-size: 13px;
+  letter-spacing: 0.14em;
+  color: var(--gold-soft);
+  text-shadow: var(--world-text-shadow);
+}
+
+/* ── 피격 방향 표시기 ──────────────────────────────────────────
+   카메라가 좁아 화면 밖에서 날아온 화살에 맞으면 어디서 맞았는지 알 수 없다.
+   화살표 대신 가장자리 호를 쓴다 — 방향은 정확히 알리면서 시선을 덜 뺏는다. */
+#hit-dir {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 30;
+}
+
+.hit-dir-arc {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 46vmin;
+  height: 46vmin;
+  margin: -23vmin 0 0 -23vmin;
+  border-radius: 50%;
+  /* 위쪽 한 조각만 남긴 링. 회전으로 방향을 가리킨다. */
+  border: 5px solid transparent;
+  border-top-color: var(--danger);
+  filter: blur(0.5px);
+  transition: opacity 90ms linear;
+}
+
+/* ── 상태창 · 스킬창 ───────────────────────────────────────────
+   게임은 열려 있는 동안에도 계속 돌아간다. 그래서 반투명하고 한쪽에 붙는다. */
+.side-panel {
+  position: fixed;
+  left: 18px;
+  top: 18px;
+  width: 300px;
+  max-height: calc(100vh - 160px);
+  overflow-y: auto;
+  background: var(--panel);
+  border: 2px solid var(--panel-edge);
+  border-radius: 12px;
+  box-shadow: var(--panel-shadow);
+  color: var(--ink);
+  font-size: 13px;
+  z-index: 35;
+  pointer-events: none;
+}
+
+.side-panel.hidden { display: none; }
+
+/* 두 창이 동시에 열리면 겹치지 않게 두 번째를 아래로 */
+#skills-panel { top: auto; bottom: 18px; }
+
+.panel-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--panel-edge);
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--gold);
+}
+
+.panel-hint {
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.06em;
+  color: var(--ink-faint);
+}
+
+.panel-body { padding: 10px 14px 14px; }
+
+.panel-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 3px 0;
+}
+
+.panel-key { color: var(--ink-soft); }
+.panel-empty { color: var(--ink-faint); font-style: italic; }
+.panel-gain { color: var(--ally); font-size: 12px; }
+
+.panel-sub {
+  padding: 0 0 6px 0;
+  font-size: 11.5px;
+  color: var(--ink-faint);
+  line-height: 1.45;
+}
+
+.panel-sep {
+  height: 1px;
+  margin: 8px 0;
+  background: var(--panel-edge);
+}
+
+.panel-note {
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  color: var(--ink-faint);
+  padding-bottom: 4px;
+}
+
+.skill-row { align-items: baseline; }
+.skill-row.locked { opacity: 0.45; }
+
+.skill-input {
+  min-width: 62px;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  color: var(--gold-soft);
+}
+
+.skill-name { flex: 1; font-weight: 600; }
+.skill-need { font-size: 11px; color: var(--ink-faint); }

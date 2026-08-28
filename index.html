@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ARPG Prototype</title>
+  <!-- 없으면 브라우저가 /favicon.ico 를 자동 요청해 404 를 남기고, 그게 플레이테스트의
+       "콘솔 에러 0건" 판정을 오염시킨다. 검증 신호를 깨끗하게 두려고 명시한다. -->
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+  <div id="game"></div>
+  <div id="vignette"></div>
+  <div id="hud">
+    <div id="boss-bar" class="hidden">
+      <span id="boss-bar-name">해골 군주</span>
+      <div id="boss-bar-track"><div id="boss-bar-fill"></div></div>
+      <div id="boss-break-status"></div>
+    </div>
+    <div id="party-panel"></div>
+    <div id="bottom-bar">
+      <div id="hp-orb" class="orb"><div class="orb-fill" id="hp-fill"></div><span class="orb-text" id="hp-text"></span></div>
+      <div id="center-column">
+        <div id="skillbar">
+          <div class="skill-slot" id="skill-basic"><span class="skill-key">좌클릭</span><span class="skill-name">휘두르기</span></div>
+          <div class="skill-slot" id="skill-whirlwind"><span class="skill-key">우클릭</span><span class="skill-name">회전베기</span><div class="cooldown-overlay"></div></div>
+          <div class="skill-slot" id="skill-dash"><span class="skill-key">Space</span><span class="skill-name">돌진</span><div class="cooldown-overlay"></div></div>
+        </div>
+        <div id="xp-bar"><div id="xp-fill"></div><span id="level-text"></span></div>
+      </div>
+      <div id="rage-orb" class="orb"><div class="orb-fill" id="rage-fill"></div><span class="orb-text" id="rage-text"></span></div>
+    </div>
+    <div id="inventory" class="hidden">
+      <h3>인벤토리 <span class="hint">(I 로 닫기)</span></h3>
+      <div id="equipment-row"></div>
+      <div id="inventory-grid"></div>
+      <div id="item-tooltip" class="hidden"></div>
+    </div>
+    <div id="floating-layer"></div>
+    <div id="nameplates"></div>
+    <div id="interaction-hint" class="hidden"></div>
+    <div id="zone-menu" class="hidden"></div>
+    <div id="overlay" class="hidden"></div>
+  </div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

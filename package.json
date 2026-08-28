@@ -1,0 +1,36 @@
+{
+  "name": "arpg-prototype",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "test": "vitest run --pool=forks --maxWorkers=1",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "playtest": "node tools/playtest/cli.mjs autorun",
+    "playtest:input": "node tools/playtest/cli.mjs inputcheck",
+    "playtest:break": "node tools/playtest/breakmeter.mjs",
+    "playtest:aggro": "node tools/playtest/aggrometer.mjs",
+    "playtest:zones": "node tools/playtest/zonecheck.mjs",
+    "playtest:town": "node tools/playtest/towncheck.mjs",
+    "playtest:serve": "node tools/playtest/server.mjs",
+    "playtest:mcp": "node tools/playtest/mcp.mjs",
+    "playtest:record": "node tools/playtest/record.mjs playtest-out",
+    "scenario": "vitest run tests/scenario.boss.test.ts tests/scenario.mine.test.ts tests/scenario.slice.test.ts --reporter=verbose",
+    "shots": "node tools/playtest/views.mjs"
+  },
+  "dependencies": {
+    "miniplex": "^2.0.0",
+    "three": "^0.185.1"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@types/three": "^0.185.4",
+    "playwright": "^1.62.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.2.2",
+    "vitest": "^4.1.11"
+  }
+}
